@@ -1,0 +1,2 @@
+Compressed agent state:
+{summary}
