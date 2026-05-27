@@ -59,10 +59,14 @@ class PreferenceStore:
                 setattr(settings, key, value)
 
         saved_tools = payload.get("enabled_tools", self.all_tools)
+        known_tools = {str(name) for name in payload.get("known_tools", saved_tools)}
         migrated_tools = [TOOL_NAME_MIGRATIONS.get(str(name), str(name)) for name in saved_tools]
         enabled_tools = []
         for name in migrated_tools:
             if name in self.all_tools and name not in enabled_tools:
+                enabled_tools.append(name)
+        for name in self.all_tools:
+            if name not in known_tools and name not in enabled_tools:
                 enabled_tools.append(name)
         settings.enabled_tools = list(enabled_tools)
         return DashboardPreferences(settings=settings, enabled_tools=enabled_tools)
@@ -72,6 +76,7 @@ class PreferenceStore:
         payload = {
             "settings": asdict(preferences.settings),
             "enabled_tools": [name for name in preferences.enabled_tools if name in self.all_tools],
+            "known_tools": list(self.all_tools),
         }
         self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 

@@ -66,6 +66,7 @@ def main() -> None:
         logger.info("Shutting down after KeyboardInterrupt.")
         print("\nShutting down.", flush=True)
     finally:
+        state.shutdown()
         server.server_close()
         logger.info("Server closed.")
 

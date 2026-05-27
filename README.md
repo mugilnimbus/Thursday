@@ -12,6 +12,7 @@ The agent uses a local LM Studio server through the OpenAI-compatible chat-compl
 - Shows session history, timeline events, tool permissions, logs, raw LLM input/output, and settings in the dashboard.
 - Stores runtime logs and raw LM Studio request/response payloads in SQLite.
 - Preserves dashboard settings and sessions across restarts.
+- Stores scheduled reminders in SQLite and wakes Thursday to run an LLM turn when they are due.
 - Compresses large `write_file` tool-call content after the model has seen the successful tool result once.
 
 ## Requirements
@@ -161,6 +162,8 @@ DEFAULT_CONTEXT_WINDOW=100000
 DEFAULT_MAX_TOKENS=32000
 WRITE_FILE_SUMMARY_MIN_CHARS=500
 WRITE_FILE_SUMMARY_MAX_TOKENS=300
+REMINDER_TIMEZONE=Europe/Dublin
+REMINDER_POLL_SECONDS=60
 ```
 
 `WRITE_FILE_SUMMARY_MIN_CHARS` controls when large `write_file` content is compressed in future context.
@@ -196,6 +199,49 @@ Current tool set:
 - `run_command`: run a Bash command inside `/workspace`.
 - `web_search`: search the web for current references.
 - `inspect_webpage`: open a URL or workspace HTML file in headless Chrome and capture diagnostics.
+- `create_reminder`: create a scheduled reminder that always runs as a future LLM turn.
+- `list_reminders`: list stored reminders.
+- `update_reminder`: update a reminder schedule or task.
+- `delete_reminder`: delete a reminder.
+
+## Reminders
+
+Thursday reminders are app state, so they are stored in the host SQLite database, not in the Docker workspace.
+
+When a reminder is due:
+
+1. The scheduler wakes up.
+2. It creates or reuses the persisted `Scheduled reminders` session.
+3. It sends the reminder task into the normal orchestrator as a synthetic user message.
+4. The LLM can use tools exactly like a normal chat turn.
+5. The result appears in the dashboard session history.
+
+There are no notification-only reminders. Every due reminder runs an LLM turn.
+
+Example requests:
+
+```text
+Tell me the weather outside daily around 10 o'clock before work.
+Tell me the EUR to INR conversion daily around 11 o'clock.
+Remind me every Friday at 6pm to review my weekly notes.
+List my reminders.
+Delete reminder <id>.
+```
+
+Reminder settings:
+
+```text
+REMINDER_TIMEZONE=Europe/Dublin
+REMINDER_POLL_SECONDS=60
+```
+
+Reminder API:
+
+```text
+GET    /api/reminders
+POST   /api/reminders
+DELETE /api/reminders/{id}
+```
 
 ## Logs And State
 

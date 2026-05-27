@@ -15,13 +15,14 @@ from .prompts import (
     render_system_prompt,
 )
 from .tools import ToolRegistry
+from .reminders import ReminderStore
 from .utils import clamp_text, estimate_tokens, parse_arguments, utc_now
 
 
 class AgentOrchestrator:
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(self, config: AppConfig, reminder_store: ReminderStore | None = None) -> None:
         self.config = config
-        self.tools = ToolRegistry(config)
+        self.tools = ToolRegistry(config, reminder_store=reminder_store)
         self.llm = LMStudioChatClient(config)
         self.session_update_callback: Callable[[Session], None] | None = None
 

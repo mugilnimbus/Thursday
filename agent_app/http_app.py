@@ -66,6 +66,11 @@ def make_handler(config: AppConfig, state: AppState) -> type[BaseHTTPRequestHand
             if path == "/api/preferences":
                 json_response(self, 200, state.preferences_public())
                 return
+            if path == "/api/reminders":
+                params = parse_qs(parsed.query)
+                include_disabled = params.get("include_disabled", ["true"])[0].strip().lower() not in {"0", "false", "no", "off"}
+                json_response(self, 200, state.reminders_public(include_disabled=include_disabled))
+                return
             if path == "/api/logs":
                 params = parse_qs(parsed.query)
                 try:
@@ -140,6 +145,23 @@ def make_handler(config: AppConfig, state: AppState) -> type[BaseHTTPRequestHand
                 result = state.reset_workspace()
                 json_response(self, 200 if result.get("ok") else 409, result)
                 return
+            if parsed.path == "/api/reminders":
+                payload = read_json(self)
+                try:
+                    reminder = state.reminder_store.create_reminder(
+                        title=str(payload.get("title") or ""),
+                        prompt=str(payload.get("prompt") or ""),
+                        recurrence=str(payload.get("recurrence") or "daily"),
+                        time_of_day=str(payload.get("time") or payload.get("time_of_day") or "09:00"),
+                        timezone_name=str(payload.get("timezone") or payload.get("timezone_name") or config.reminder_timezone),
+                        date_value=str(payload.get("date") or payload.get("date_value") or ""),
+                        weekdays=[str(item) for item in payload.get("weekdays", [])] if isinstance(payload.get("weekdays", []), list) else [],
+                        enabled=bool(payload.get("enabled", True)),
+                    )
+                    json_response(self, 201, {"ok": True, "reminder": reminder.public()})
+                except Exception as exc:
+                    json_response(self, 400, {"ok": False, "error": str(exc)})
+                return
             json_response(self, 404, {"error": "Not found"})
 
         def do_DELETE(self) -> None:
@@ -153,6 +175,13 @@ def make_handler(config: AppConfig, state: AppState) -> type[BaseHTTPRequestHand
                     json_response(self, 200, {"ok": True, "deleted": session_id})
                     return
                 json_response(self, 404, {"error": "Session not found"})
+                return
+            if parsed.path.startswith("/api/reminders/"):
+                reminder_id = parsed.path.rsplit("/", 1)[-1]
+                if state.reminder_store.delete_reminder(reminder_id):
+                    json_response(self, 200, {"ok": True, "deleted": reminder_id})
+                    return
+                json_response(self, 404, {"ok": False, "error": "Reminder not found"})
                 return
             json_response(self, 404, {"error": "Not found"})
 

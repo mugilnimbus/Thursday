@@ -13,11 +13,13 @@ from urllib.parse import parse_qs, unquote, urlparse
 import httpx
 
 from .config import AppConfig
+from .reminders import ReminderStore
 
 
 class ToolRegistry:
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(self, config: AppConfig, reminder_store: ReminderStore | None = None) -> None:
         self.config = config
+        self.reminder_store = reminder_store
         self.container_tools = {
             "inspect_workspace",
             "read_file",
@@ -35,6 +37,10 @@ class ToolRegistry:
             "web_search": self.web_search,
             "inspect_webpage": self.inspect_webpage,
             "run_command": self.run_command,
+            "create_reminder": self.create_reminder,
+            "list_reminders": self.list_reminders,
+            "update_reminder": self.update_reminder,
+            "delete_reminder": self.delete_reminder,
         }
 
     def names(self) -> list[str]:
@@ -175,6 +181,80 @@ class ToolRegistry:
                             "timeout_seconds": {"type": "integer", "description": "Timeout in seconds.", "default": 30},
                         },
                         "required": ["command"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "create_reminder",
+                    "description": "Create a scheduled reminder. Every due reminder starts a normal Thursday LLM turn; there are no plain notification-only reminders.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string", "description": "Short reminder name."},
+                            "prompt": {"type": "string", "description": "The full task Thursday should perform when the reminder is due."},
+                            "recurrence": {"type": "string", "description": "Schedule type.", "enum": ["daily", "weekly", "once"], "default": "daily"},
+                            "time": {"type": "string", "description": "Local time such as 10:00, 11:30, or 9pm.", "default": "09:00"},
+                            "timezone": {"type": "string", "description": "IANA timezone, for example Europe/Dublin.", "default": self.config.reminder_timezone},
+                            "date": {"type": "string", "description": "YYYY-MM-DD date for one-time reminders.", "default": ""},
+                            "weekdays": {
+                                "type": "array",
+                                "items": {"type": "string", "enum": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]},
+                                "description": "Weekdays for weekly reminders.",
+                                "default": [],
+                            },
+                        },
+                        "required": ["title", "prompt", "time"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_reminders",
+                    "description": "List scheduled reminders stored by Thursday.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "include_disabled": {"type": "boolean", "description": "Include completed or disabled reminders.", "default": True},
+                        },
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "update_reminder",
+                    "description": "Update an existing scheduled reminder.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "reminder_id": {"type": "string", "description": "Reminder id from list_reminders."},
+                            "title": {"type": "string", "description": "New short reminder name."},
+                            "prompt": {"type": "string", "description": "New reminder task prompt."},
+                            "recurrence": {"type": "string", "enum": ["daily", "weekly", "once"], "description": "New schedule type."},
+                            "time": {"type": "string", "description": "New local time such as 10:00 or 9pm."},
+                            "timezone": {"type": "string", "description": "New IANA timezone."},
+                            "date": {"type": "string", "description": "New YYYY-MM-DD date for one-time reminders."},
+                            "weekdays": {"type": "array", "items": {"type": "string"}, "description": "New weekdays for weekly reminders."},
+                            "enabled": {"type": "boolean", "description": "Whether the reminder is active."},
+                        },
+                        "required": ["reminder_id"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "delete_reminder",
+                    "description": "Delete a scheduled reminder by id.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "reminder_id": {"type": "string", "description": "Reminder id from list_reminders."},
+                        },
+                        "required": ["reminder_id"],
                     },
                 },
             },
@@ -469,6 +549,48 @@ class ToolRegistry:
             "container": self.config.docker_container_name,
             "workdir": self.config.docker_workdir,
         }
+
+    def create_reminder(
+        self,
+        title: str,
+        prompt: str,
+        recurrence: str = "daily",
+        time: str = "09:00",
+        timezone: str = "",
+        date: str = "",
+        weekdays: list[str] | None = None,
+    ) -> dict[str, Any]:
+        if not self.reminder_store:
+            return {"ok": False, "error": "Reminder store is not configured."}
+        reminder = self.reminder_store.create_reminder(
+            title=title,
+            prompt=prompt,
+            recurrence=recurrence,
+            time_of_day=time,
+            timezone_name=timezone or self.config.reminder_timezone,
+            date_value=date,
+            weekdays=weekdays or [],
+            enabled=True,
+        )
+        return {"ok": True, "reminder": reminder.public()}
+
+    def list_reminders(self, include_disabled: bool = True) -> dict[str, Any]:
+        if not self.reminder_store:
+            return {"ok": False, "error": "Reminder store is not configured."}
+        reminders = [reminder.public() for reminder in self.reminder_store.list_reminders(include_disabled=include_disabled)]
+        return {"ok": True, "reminders": reminders, "count": len(reminders)}
+
+    def update_reminder(self, reminder_id: str, **updates: Any) -> dict[str, Any]:
+        if not self.reminder_store:
+            return {"ok": False, "error": "Reminder store is not configured."}
+        reminder = self.reminder_store.update_reminder(reminder_id, updates)
+        return {"ok": True, "reminder": reminder.public()}
+
+    def delete_reminder(self, reminder_id: str) -> dict[str, Any]:
+        if not self.reminder_store:
+            return {"ok": False, "error": "Reminder store is not configured."}
+        deleted = self.reminder_store.delete_reminder(reminder_id)
+        return {"ok": deleted, "deleted": reminder_id if deleted else "", "error": "" if deleted else f"Reminder not found: {reminder_id}"}
 
     def _docker_exec(self, script: str, timeout_seconds: int, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
         wrapped = f"set -euo pipefail\nmkdir -p {self._q(self.config.docker_workdir)}\ncd {self._q(self.config.docker_workdir)}\n{script}"
