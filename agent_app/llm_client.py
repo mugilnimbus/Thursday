@@ -6,6 +6,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from openai import APIStatusError, OpenAI
@@ -26,7 +27,7 @@ class LMStudioChatClient:
         request_id = uuid.uuid4().hex
         payload: dict[str, Any] = {
             "model": settings.model,
-            "messages": self._sanitize_messages(messages),
+            "messages": self._messages_with_current_awareness(self._sanitize_messages(messages)),
             "temperature": settings.temperature,
             "top_p": settings.top_p,
             "max_tokens": settings.max_tokens,
@@ -37,6 +38,31 @@ class LMStudioChatClient:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
         return self._create_chat_completion(endpoint, payload, request_id, attempt=1, compatibility_mode=False)
+
+    def _messages_with_current_awareness(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        enriched = list(messages)
+        enriched.append({"role": "system", "content": self._current_awareness_message()})
+        return enriched
+
+    def _current_awareness_message(self) -> str:
+        timezone_name = self.config.reminder_timezone or "UTC"
+        try:
+            local_now = datetime.now(ZoneInfo(timezone_name))
+        except ZoneInfoNotFoundError:
+            timezone_name = "UTC"
+            local_now = datetime.now(timezone.utc)
+        utc_now = datetime.now(timezone.utc)
+        return (
+            "Current date/time awareness for this request only. "
+            "Use this for today/tomorrow/yesterday, current time, scheduling, and time-sensitive interpretation. "
+            "Do not treat this as conversation memory.\n"
+            f"- Location: {self.config.current_location}\n"
+            f"- Local timezone: {timezone_name}\n"
+            f"- Local day: {local_now.strftime('%A')}\n"
+            f"- Local date: {local_now.strftime('%Y-%m-%d')}\n"
+            f"- Local time: {local_now.strftime('%H:%M:%S %Z')}\n"
+            f"- UTC timestamp: {utc_now.isoformat()}"
+        )
 
     def status(self, endpoint: str | None = None) -> dict[str, Any]:
         resolved_endpoint = (endpoint or self.config.lmstudio_endpoint).rstrip("/")

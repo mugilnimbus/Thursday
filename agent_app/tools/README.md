@@ -1,6 +1,8 @@
 # Thursday Tool Modules
 
-Drop a new `tool_name.py` file into this folder and restart Thursday. The registry auto-discovers every non-private Python file in this package.
+Drop a new `tool_name.py` file into this folder. The registry auto-discovers every non-private Python file in this package and hot-reloads when files change.
+
+Thursday also has a `create_agent_tool` tool that can write these modules for itself. That tool validates the name and Python syntax, writes the module here, and makes the new tool available on the next tool-list refresh or model turn.
 
 Each tool module must define:
 

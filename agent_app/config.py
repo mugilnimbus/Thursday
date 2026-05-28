@@ -101,6 +101,7 @@ class AppConfig:
     write_file_summary_max_tokens: int
     context_summary_max_tokens: int
     event_history_limit: int
+    current_location: str
     reminder_timezone: str
     reminder_poll_seconds: int
 
@@ -161,6 +162,7 @@ class AppConfig:
             write_file_summary_max_tokens=env_int("WRITE_FILE_SUMMARY_MAX_TOKENS", 300),
             context_summary_max_tokens=env_int("CONTEXT_SUMMARY_MAX_TOKENS", default_context_window),
             event_history_limit=env_int("EVENT_HISTORY_LIMIT", 200),
+            current_location=env_str("CURRENT_LOCATION", "Dublin, Ireland"),
             reminder_timezone=env_str("REMINDER_TIMEZONE", "Europe/Dublin"),
             reminder_poll_seconds=env_int("REMINDER_POLL_SECONDS", 60),
         )

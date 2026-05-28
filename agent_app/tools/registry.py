@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -20,19 +21,25 @@ class ToolRegistry:
     def __init__(self, config: AppConfig, reminder_store: ReminderStore | None = None) -> None:
         self.config = config
         self.context = ToolContext(config=config, reminder_store=reminder_store)
+        self.package_dir = Path(__file__).parent
+        self.load_errors: dict[str, str] = {}
+        self._snapshot: tuple[tuple[str, int, int], ...] = ()
         self.tool_specs = self._load_tool_specs()
 
     def names(self) -> list[str]:
+        self._refresh_if_changed()
         return list(self.tool_specs.keys())
 
     def workspace_label(self) -> str:
         return self.context.workspace_label()
 
     def definitions(self, enabled_tools: list[str] | None = None) -> list[dict[str, Any]]:
+        self._refresh_if_changed()
         enabled = set(self.names() if enabled_tools is None else enabled_tools)
         return [spec.definition for spec in self.tool_specs.values() if spec.name in enabled]
 
     def invoke(self, name: str, args: dict[str, Any], enabled_tools: list[str] | None = None) -> dict[str, Any]:
+        self._refresh_if_changed()
         if enabled_tools is not None and name not in enabled_tools:
             return {"ok": False, "error": f"Tool is disabled: {name}"}
         spec = self.tool_specs.get(name)
@@ -47,17 +54,26 @@ class ToolRegistry:
 
     def _load_tool_specs(self) -> dict[str, ToolSpec]:
         package_name = __package__
-        package_dir = Path(__file__).parent
         specs: list[ToolSpec] = []
-        for module_info in pkgutil.iter_modules([str(package_dir)]):
+        load_errors: dict[str, str] = {}
+        for module_info in pkgutil.iter_modules([str(self.package_dir)]):
             module_name = module_info.name
             if module_name.startswith("_") or module_name in INTERNAL_MODULES:
                 continue
-            module = importlib.import_module(f"{package_name}.{module_name}")
-            spec = self._spec_from_module(module_name, module)
-            specs.append(spec)
+            full_name = f"{package_name}.{module_name}"
+            try:
+                if full_name in sys.modules:
+                    module = importlib.reload(sys.modules[full_name])
+                else:
+                    module = importlib.import_module(full_name)
+                spec = self._spec_from_module(module_name, module)
+                specs.append(spec)
+            except Exception as exc:
+                load_errors[module_name] = str(exc)
 
         ordered = sorted(specs, key=lambda spec: (spec.order, spec.name))
+        self.load_errors = load_errors
+        self._snapshot = self._current_snapshot()
         return {spec.name: spec for spec in ordered}
 
     def _spec_from_module(self, module_name: str, module: Any) -> ToolSpec:
@@ -81,3 +97,17 @@ class ToolRegistry:
             requires_container=bool(getattr(module, "REQUIRES_CONTAINER", False)),
             order=int(getattr(module, "TOOL_ORDER", 1000)),
         )
+
+    def _refresh_if_changed(self) -> None:
+        if self._current_snapshot() != self._snapshot:
+            self.tool_specs = self._load_tool_specs()
+
+    def _current_snapshot(self) -> tuple[tuple[str, int, int], ...]:
+        snapshot: list[tuple[str, int, int]] = []
+        for path in self.package_dir.glob("*.py"):
+            module_name = path.stem
+            if module_name.startswith("_") or module_name in INTERNAL_MODULES:
+                continue
+            stat = path.stat()
+            snapshot.append((path.name, stat.st_mtime_ns, stat.st_size))
+        return tuple(sorted(snapshot))
