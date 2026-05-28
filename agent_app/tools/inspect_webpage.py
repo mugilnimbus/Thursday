@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import subprocess
 import uuid
 from datetime import datetime
@@ -113,6 +114,18 @@ def run(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     stderr = "\n".join(part for part in [screenshot_result.stderr, dom_result.stderr] if part)
     diagnostics = browser_diagnostics(stderr)
 
+    llm_images: list[dict[str, str]] = []
+    if screenshot_path.exists():
+        image_data = base64.b64encode(screenshot_path.read_bytes()).decode("ascii")
+        llm_images.append(
+            {
+                "source": TOOL_NAME,
+                "path": str(screenshot_path.resolve()),
+                "mime_type": "image/png",
+                "data_url": f"data:image/png;base64,{image_data}",
+            }
+        )
+
     return {
         "ok": screenshot_result.returncode == 0 and screenshot_path.exists(),
         "url": url or "",
@@ -128,4 +141,5 @@ def run(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         "browser": browser,
         "exit_code": screenshot_result.returncode,
         "stderr": stderr.strip(),
+        "llm_images": llm_images,
     }

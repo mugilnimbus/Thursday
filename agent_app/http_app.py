@@ -123,9 +123,10 @@ def make_handler(config: AppConfig, state: AppState) -> type[BaseHTTPRequestHand
                         return
                     session = state.get_session(payload.get("session_id"))
                     settings = payload.get("settings") or {}
+                    images = payload.get("images") or []
                     thread = threading.Thread(
                         target=state.orchestrator.run_turn,
-                        args=(session, message, settings),
+                        args=(session, message, settings, images),
                         daemon=True,
                     )
                     thread.start()

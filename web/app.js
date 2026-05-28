@@ -19,6 +19,7 @@ const state = {
   rawOpenPanels: new Set(),
   settingsOpen: false,
   selectedTimelineEvent: null,
+  pendingImages: [],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -124,6 +125,8 @@ function renderSession(session) {
       const node = document.createElement("article");
       node.className = `message ${message.role}`;
       node.innerHTML = `<span class="role">${escapeHtml(message.role)}</span><div class="message-content">${renderMarkdown(message.content)}</div>`;
+      const gallery = renderMessageImages(message.images || []);
+      if (gallery) node.appendChild(gallery);
       chat.appendChild(node);
     });
     state.lastRenderedMessageSignature = messageSignature;
@@ -350,13 +353,17 @@ async function sendMessage(event) {
   event.preventDefault();
   await savePreferencesNow();
   const input = $("messageInput");
-  const message = input.value.trim();
-  if (!message) return;
+  const message = input.value.trim() || (state.pendingImages.length ? "Please analyze the attached image(s)." : "");
+  if (!message && !state.pendingImages.length) return;
+  const images = state.pendingImages.slice();
   input.value = "";
+  state.pendingImages = [];
+  renderImagePreview();
   const payload = {
     session_id: state.sessionId,
     message,
     settings: settingsFromUi(),
+    images,
   };
   const result = await api("/api/chat", { method: "POST", body: JSON.stringify(payload) });
   state.sessionId = result.session_id;
@@ -484,6 +491,8 @@ function applyPreferences(preferences) {
 
 function bindUi() {
   $("chatForm").addEventListener("submit", sendMessage);
+  $("attachImageBtn").addEventListener("click", () => $("imageInput").click());
+  $("imageInput").addEventListener("change", handleImageSelection);
   $("messageInput").addEventListener("keydown", (event) => {
     if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
     event.preventDefault();
@@ -527,6 +536,68 @@ function bindUi() {
       await refreshLogs();
     });
   });
+}
+
+async function handleImageSelection(event) {
+  const files = Array.from(event.target.files || []).filter((file) => file.type.startsWith("image/"));
+  if (!files.length) return;
+  const availableSlots = Math.max(0, 6 - state.pendingImages.length);
+  const selected = files.slice(0, availableSlots);
+  const loaded = await Promise.all(selected.map(readImageFile));
+  state.pendingImages.push(...loaded.filter(Boolean));
+  event.target.value = "";
+  renderImagePreview();
+}
+
+function readImageFile(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      resolve({
+        name: file.name,
+        mime_type: file.type || "image/png",
+        size: file.size,
+        data_url: String(reader.result || ""),
+      });
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderImagePreview() {
+  const preview = $("imagePreview");
+  preview.innerHTML = "";
+  preview.classList.toggle("empty", !state.pendingImages.length);
+  state.pendingImages.forEach((image, index) => {
+    const chip = document.createElement("div");
+    chip.className = "image-chip";
+    chip.innerHTML = `
+      <img src="${escapeAttribute(image.data_url)}" alt="${escapeAttribute(image.name)}">
+      <span>${escapeHtml(image.name)}</span>
+      <button type="button" aria-label="Remove ${escapeAttribute(image.name)}">×</button>
+    `;
+    chip.querySelector("button").addEventListener("click", () => {
+      state.pendingImages.splice(index, 1);
+      renderImagePreview();
+    });
+    preview.appendChild(chip);
+  });
+}
+
+function renderMessageImages(images) {
+  if (!images.length) return null;
+  const gallery = document.createElement("div");
+  gallery.className = "message-images";
+  images.forEach((image) => {
+    const figure = document.createElement("figure");
+    figure.innerHTML = `
+      <img src="${escapeAttribute(image.data_url)}" alt="${escapeAttribute(image.name || "attached image")}">
+      <figcaption>${escapeHtml(image.name || "attached image")}</figcaption>
+    `;
+    gallery.appendChild(figure);
+  });
+  return gallery;
 }
 
 function schedulePreferencesSave() {
@@ -949,7 +1020,12 @@ function resetSessionMetrics() {
 }
 
 function getMessageSignature(session) {
-  return JSON.stringify((session.visible_messages || []).map((message) => [message.role, message.content, message.timestamp]));
+  return JSON.stringify((session.visible_messages || []).map((message) => [
+    message.role,
+    message.content,
+    message.timestamp,
+    (message.images || []).map((image) => [image.name, image.mime_type, image.data_url?.length || 0]),
+  ]));
 }
 
 function hasSelectionInside(element) {
@@ -970,6 +1046,10 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value).replaceAll("`", "&#096;");
 }
 
 function escapeClass(value) {

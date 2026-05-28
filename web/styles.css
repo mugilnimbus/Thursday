@@ -1001,7 +1001,10 @@ input[type="range"] {
   border-top: 1px solid var(--line);
   padding: 12px;
   display: grid;
-  grid-template-columns: 1fr 88px;
+  grid-template-columns: 1fr 48px 88px;
+  grid-template-areas:
+    "preview preview preview"
+    "input attach send";
   gap: 10px;
   background: var(--surface);
 }
@@ -1010,6 +1013,95 @@ input[type="range"] {
   min-height: 48px;
   background: var(--accent);
   border-color: var(--accent);
+}
+
+.composer textarea {
+  grid-area: input;
+}
+
+.composer > button[type="submit"] {
+  grid-area: send;
+}
+
+.attach-button {
+  grid-area: attach;
+  padding: 0;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.image-preview {
+  grid-area: preview;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.image-preview.empty {
+  display: none;
+}
+
+.image-chip {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 8px;
+  max-width: 320px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  padding: 6px;
+}
+
+.image-chip img {
+  width: 42px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.image-chip span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-chip button {
+  min-height: 28px;
+  width: 28px;
+  padding: 0;
+  color: #ffffff;
+  background: rgba(255, 85, 130, 0.2);
+  border-color: rgba(255, 85, 130, 0.5);
+}
+
+.message-images {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.message-images figure {
+  margin: 0;
+}
+
+.message-images img {
+  display: block;
+  max-width: min(420px, 100%);
+  max-height: 320px;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #000000;
+}
+
+.message-images figcaption {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .metric-row {
@@ -1341,5 +1433,10 @@ input[type="range"] {
 
   .composer {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "preview"
+      "input"
+      "attach"
+      "send";
   }
 }

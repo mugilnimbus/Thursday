@@ -34,7 +34,14 @@ class AgentOrchestrator:
         except Exception:
             pass
 
-    def run_turn(self, session: Session, user_message: str, settings_patch: dict[str, Any] | None = None) -> None:
+    def run_turn(
+        self,
+        session: Session,
+        user_message: str,
+        settings_patch: dict[str, Any] | None = None,
+        images: list[dict[str, Any]] | None = None,
+    ) -> None:
+        chat_images = self.normalize_input_images(images or [])
         with session.lock:
             if settings_patch:
                 for key, value in settings_patch.items():
@@ -44,12 +51,17 @@ class AgentOrchestrator:
             session.current_goal = user_message
             if session.title == "New session":
                 session.title = user_message[:48] or "Agent session"
-            session.visible_messages.append({"role": "user", "content": user_message, "timestamp": utc_now()})
+            session.visible_messages.append({
+                "role": "user",
+                "content": user_message,
+                "timestamp": utc_now(),
+                "images": self.visible_images(chat_images),
+            })
             if not session.messages:
                 session.messages = [{"role": "system", "content": self.system_prompt(session)}]
             else:
                 session.messages[0] = {"role": "system", "content": self.system_prompt(session)}
-            session.messages.append({"role": "user", "content": user_message})
+            session.messages.append({"role": "user", "content": self.user_content_with_images(user_message, chat_images)})
             session.add_event("user", "User message received", chars=len(user_message))
             self.prune_context(session)
             self.save_session(session)
@@ -173,19 +185,21 @@ class AgentOrchestrator:
                         session.add_event("tool_call", f"Invoking {name}", tool=name, args=args)
 
                     result = self.tools.invoke(name, args, session.settings.enabled_tools)
+                    llm_images = self.extract_llm_images(result)
+                    stored_result = self.strip_llm_images(result)
                     empty_after_tool_retries = 0
                     last_tool_name = str(name or "")
-                    last_tool_result = result
-                    result_text = json.dumps(result, indent=2)
+                    last_tool_result = stored_result
+                    result_text = json.dumps(stored_result, indent=2)
                     observation = result_text
 
                     with session.lock:
-                        if name in {"write_file", "edit_file"} and result.get("ok") and result.get("path"):
-                            rel = result["path"]
+                        if name in {"write_file", "edit_file"} and stored_result.get("ok") and stored_result.get("path"):
+                            rel = stored_result["path"]
                             if rel not in session.modified_files:
                                 session.modified_files.append(rel)
-                        if not result.get("ok"):
-                            error = result.get("error") or result.get("stderr") or result_text
+                        if not stored_result.get("ok"):
+                            error = stored_result.get("error") or stored_result.get("stderr") or result_text
                             session.recent_errors.append(clamp_text(str(error), session.settings.context_window))
                         session.messages.append({
                             "role": "tool",
@@ -193,10 +207,19 @@ class AgentOrchestrator:
                             "name": name,
                             "content": observation,
                         })
-                        session.add_event("tool_result", f"{name} returned {'success' if result.get('ok') else 'error'}", tool=name, ok=result.get("ok"), result=result)
+                        if llm_images:
+                            session.messages.append(self.tool_image_message(str(name or "tool"), stored_result, llm_images))
+                            session.add_event("vision", f"Attached {len(llm_images)} image(s) from {name} to the next LLM request", tool=name, image_count=len(llm_images))
+                        session.add_event(
+                            "tool_result",
+                            f"{name} returned {'success' if stored_result.get('ok') else 'error'}",
+                            tool=name,
+                            ok=stored_result.get("ok"),
+                            result=stored_result,
+                        )
                         if (
                             name == "write_file"
-                            and result.get("ok")
+                            and stored_result.get("ok")
                             and isinstance(args.get("content"), str)
                             and self.should_summarize_written_content(str(args.get("content")))
                         ):
@@ -205,7 +228,7 @@ class AgentOrchestrator:
                                 "tool_call_id": tool_call_id,
                                 "tool_name": str(name or ""),
                                 "args": args,
-                                "result": result,
+                                "result": stored_result,
                                 "settings": session.settings,
                             })
                         else:
@@ -312,6 +335,74 @@ class AgentOrchestrator:
             "token_estimate": str(session.token_estimate),
             "context_window": str(session.settings.context_window),
         }
+
+    def normalize_input_images(self, images: list[dict[str, Any]]) -> list[dict[str, str]]:
+        normalized: list[dict[str, str]] = []
+        for image in images[:6]:
+            data_url = str(image.get("data_url") or "")
+            mime_type = str(image.get("mime_type") or image.get("type") or "image/png")
+            name = str(image.get("name") or "image")
+            if not data_url.startswith("data:image/"):
+                continue
+            normalized.append({"data_url": data_url, "mime_type": mime_type, "name": name})
+        return normalized
+
+    def visible_images(self, images: list[dict[str, str]]) -> list[dict[str, str]]:
+        return [{"name": image["name"], "data_url": image["data_url"], "mime_type": image["mime_type"]} for image in images]
+
+    def user_content_with_images(self, text: str, images: list[dict[str, str]]) -> str | list[dict[str, Any]]:
+        if not images:
+            return text
+        content: list[dict[str, Any]] = [{"type": "text", "text": text or "Please analyze the attached image(s)."}]
+        for image in images:
+            content.append({"type": "image_url", "image_url": {"url": image["data_url"]}})
+        return content
+
+    def extract_llm_images(self, result: dict[str, Any]) -> list[dict[str, str]]:
+        images = result.get("llm_images")
+        if not isinstance(images, list):
+            return []
+        normalized: list[dict[str, str]] = []
+        for image in images:
+            if not isinstance(image, dict):
+                continue
+            data_url = str(image.get("data_url") or "")
+            if not data_url.startswith("data:image/"):
+                continue
+            normalized.append({
+                "source": str(image.get("source") or "tool"),
+                "path": str(image.get("path") or ""),
+                "mime_type": str(image.get("mime_type") or "image/png"),
+                "data_url": data_url,
+            })
+        return normalized
+
+    def strip_llm_images(self, result: dict[str, Any]) -> dict[str, Any]:
+        if "llm_images" not in result:
+            return result
+        stripped = dict(result)
+        images = self.extract_llm_images(result)
+        stripped["llm_images"] = [
+            {
+                "source": image.get("source", "tool"),
+                "path": image.get("path", ""),
+                "mime_type": image.get("mime_type", "image/png"),
+                "attached_to_next_llm_request": True,
+            }
+            for image in images
+        ]
+        return stripped
+
+    def tool_image_message(self, tool_name: str, result: dict[str, Any], images: list[dict[str, str]]) -> dict[str, Any]:
+        text = (
+            f"{tool_name} produced {len(images)} screenshot image(s). "
+            "Inspect the attached pixels directly before making visual claims. "
+            f"Screenshot path: {result.get('screenshot_path') or images[0].get('path') or '(unknown)'}"
+        )
+        content: list[dict[str, Any]] = [{"type": "text", "text": text}]
+        for image in images:
+            content.append({"type": "image_url", "image_url": {"url": image["data_url"]}})
+        return {"role": "user", "content": content}
 
     def first_choice(self, raw: dict[str, Any]) -> dict[str, Any]:
         choices = raw.get("choices") if isinstance(raw, dict) else None

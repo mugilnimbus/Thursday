@@ -56,7 +56,10 @@
         <section class="chat-shell">
           <div id="chatLog" class="chat-log"></div>
           <form id="chatForm" class="composer">
+            <div id="imagePreview" class="image-preview empty" aria-live="polite"></div>
             <textarea id="messageInput" placeholder="Ask the agent to build, inspect, run, or debug software..." rows="3"></textarea>
+            <input id="imageInput" type="file" accept="image/*" multiple hidden>
+            <button id="attachImageBtn" class="icon-button attach-button" type="button" title="Attach images" aria-label="Attach images">+</button>
             <button type="submit">Send</button>
           </form>
         </section>
