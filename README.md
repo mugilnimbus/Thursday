@@ -224,9 +224,25 @@ Example requests:
 Tell me the weather outside daily around 10 o'clock before work.
 Tell me the EUR to INR conversion daily around 11 o'clock.
 Remind me every Friday at 6pm to review my weekly notes.
+Run my standup preparation every 30 minutes.
+Check my dashboard every hour at :15.
+Remind me on the 1st of every month at 9am to pay rent.
 List my reminders.
 Delete reminder <id>.
 ```
+
+Reminder schedule modes:
+
+```text
+once            One run on a specific YYYY-MM-DD date at a local time.
+every_minutes   Repeats every N minutes. Use interval_minutes.
+hourly          Repeats every hour at a specific minute. Use time="15" or time="00:15" for :15.
+daily           Repeats every day at a local time. Use time.
+weekly          Repeats on selected weekdays at a local time. Use weekdays and time.
+monthly         Repeats monthly on a day of month at a local time. Use day_of_month and time.
+```
+
+The tool uses the configured system timezone automatically. The model should not pass a timezone field.
 
 Reminder settings:
 

@@ -151,11 +151,13 @@ def make_handler(config: AppConfig, state: AppState) -> type[BaseHTTPRequestHand
                     reminder = state.reminder_store.create_reminder(
                         title=str(payload.get("title") or ""),
                         prompt=str(payload.get("prompt") or ""),
-                        recurrence=str(payload.get("recurrence") or "daily"),
+                        recurrence=str(payload.get("schedule") or payload.get("recurrence") or "daily"),
                         time_of_day=str(payload.get("time") or payload.get("time_of_day") or "09:00"),
                         timezone_name=str(payload.get("timezone") or payload.get("timezone_name") or config.reminder_timezone),
                         date_value=str(payload.get("date") or payload.get("date_value") or ""),
                         weekdays=[str(item) for item in payload.get("weekdays", [])] if isinstance(payload.get("weekdays", []), list) else [],
+                        interval_minutes=int(payload.get("interval_minutes") or 0),
+                        day_of_month=int(payload.get("day_of_month") or 0),
                         enabled=bool(payload.get("enabled", True)),
                     )
                     json_response(self, 201, {"ok": True, "reminder": reminder.public()})

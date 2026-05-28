@@ -101,11 +101,6 @@ class AgentOrchestrator:
                         tool_calls=len(tool_calls),
                         final_answer_requested=final_answer_requested,
                     )
-                    if pending_write_file_compressions:
-                        for pending in pending_write_file_compressions:
-                            self.compress_successful_write_file_call_after_observation(session=session, **pending)
-                        pending_write_file_compressions.clear()
-                        self.prune_context(session)
                     self.save_session(session)
 
                 if not tool_calls:
@@ -113,18 +108,18 @@ class AgentOrchestrator:
                         if empty_after_tool_retries < 1 and step < session.settings.max_steps:
                             empty_after_tool_retries += 1
                             with session.lock:
-                                session.messages.append({
-                                    "role": "system",
-                                    "content": (
-                                        "The previous tool call returned a result, but your last response was empty. "
-                                        "Continue the task now: either call the next required tool or give a concise final answer. "
-                                        "Do not end with an empty message."
-                                    ),
-                                })
-                                session.add_event("retry", "Model returned empty text after tool result; asking it to continue", tool=last_tool_name)
-                                self.prune_context(session)
+                                if assistant_index < len(session.messages):
+                                    session.messages.pop(assistant_index)
+                                session.add_event("retry", "Model returned empty text after tool result; retrying the same LLM input", tool=last_tool_name)
                                 self.save_session(session)
                             continue
+                        if pending_write_file_compressions:
+                            with session.lock:
+                                for pending in pending_write_file_compressions:
+                                    self.compress_successful_write_file_call_after_observation(session=session, **pending)
+                                pending_write_file_compressions.clear()
+                                self.prune_context(session)
+                                self.save_session(session)
                         fallback_content = self.fallback_tool_response(last_tool_name, last_tool_result)
                         with session.lock:
                             session.messages.append({"role": "assistant", "content": fallback_content})
@@ -146,12 +141,27 @@ class AgentOrchestrator:
                                 "generated_fallback": True,
                             })
                             session.add_event("fallback", "Model returned no visible assistant content")
+                    elif pending_write_file_compressions:
+                        with session.lock:
+                            for pending in pending_write_file_compressions:
+                                self.compress_successful_write_file_call_after_observation(session=session, **pending)
+                            pending_write_file_compressions.clear()
+                            self.prune_context(session)
+                            self.save_session(session)
                     with session.lock:
                         session.status = "idle"
                         session.add_event("done", "Agent turn completed")
                         self.refresh_metrics(session)
                         self.save_session(session)
                     return
+
+                if pending_write_file_compressions:
+                    with session.lock:
+                        for pending in pending_write_file_compressions:
+                            self.compress_successful_write_file_call_after_observation(session=session, **pending)
+                        pending_write_file_compressions.clear()
+                        self.prune_context(session)
+                        self.save_session(session)
 
                 for call in tool_calls:
                     name = call.get("function", {}).get("name") or call.get("name")
