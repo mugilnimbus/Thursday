@@ -17,3 +17,5 @@ class ToolSpec:
     runner: ToolRunner
     requires_container: bool = False
     order: int = 1000
+    module_name: str = ""
+    category: str = "tool"

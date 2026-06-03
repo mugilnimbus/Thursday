@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1180" viewBox="0 0 1800 1180" role="img" aria-labelledby="title desc">
+  <title id="title">Thursday Agent Components Diagram</title>
+  <desc id="desc">Component architecture for the Thursday agent, showing frontend, backend runtime, orchestration, LLM, skills, tools, storage, logs, Docker workspace, and host integrations.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7f9fc; }
+      .zone { fill: #ffffff; stroke: #c8d1e2; stroke-width: 2; rx: 18; }
+      .zone-title { fill: #1f2a44; font: 700 25px Arial, sans-serif; }
+      .zone-subtitle { fill: #5e6a82; font: 15px Arial, sans-serif; }
+      .box { fill: #fbfdff; stroke: #7d8fb3; stroke-width: 2; rx: 12; }
+      .box-strong { fill: #eef5ff; stroke: #3368c6; stroke-width: 2.5; rx: 12; }
+      .box-tool { fill: #f2fbf6; stroke: #2b9b61; stroke-width: 2; rx: 12; }
+      .box-data { fill: #fff8e8; stroke: #c99018; stroke-width: 2; rx: 12; }
+      .box-external { fill: #f8f2ff; stroke: #8652c7; stroke-width: 2; rx: 12; }
+      .label { fill: #18233a; font: 700 18px Arial, sans-serif; }
+      .text { fill: #344055; font: 15px Arial, sans-serif; }
+      .small { fill: #5e6a82; font: 13px Arial, sans-serif; }
+      .edge { fill: none; stroke: #51627f; stroke-width: 2.2; marker-end: url(#arrow); }
+      .edge-soft { fill: none; stroke: #8a99b5; stroke-width: 1.8; marker-end: url(#arrowSoft); stroke-dasharray: 8 7; }
+      .edge-green { fill: none; stroke: #238454; stroke-width: 2.2; marker-end: url(#arrowGreen); }
+      .edge-purple { fill: none; stroke: #7546b4; stroke-width: 2.2; marker-end: url(#arrowPurple); }
+      .note { fill: #ffffff; stroke: #d6deeb; stroke-width: 1.5; rx: 10; }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#51627f"/>
+    </marker>
+    <marker id="arrowSoft" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#8a99b5"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#238454"/>
+    </marker>
+    <marker id="arrowPurple" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#7546b4"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1800" height="1180"/>
+  <text x="70" y="70" class="zone-title" style="font-size:34px;">Thursday Agent Architecture</text>
+  <text x="70" y="100" class="zone-subtitle">Clean component boundaries: frontend, backend runtime, orchestration, LLM adapter, skill catalog, unified tool API, concrete tools, storage, logs, and external execution targets.</text>
+
+  <rect x="60" y="145" width="280" height="855" class="zone"/>
+  <text x="85" y="190" class="zone-title">Frontend</text>
+  <text x="85" y="218" class="zone-subtitle">frontend/</text>
+  <rect x="90" y="255" width="220" height="105" class="box-strong"/>
+  <text x="112" y="292" class="label">Dashboard UI</text>
+  <text x="112" y="320" class="text">index.html</text>
+  <text x="112" y="344" class="small">Chat, settings, tools, logs</text>
+  <rect x="90" y="390" width="220" height="105" class="box"/>
+  <text x="112" y="427" class="label">Client State</text>
+  <text x="112" y="455" class="text">app.js</text>
+  <text x="112" y="479" class="small">Sessions, uploads, polling</text>
+  <rect x="90" y="525" width="220" height="105" class="box"/>
+  <text x="112" y="562" class="label">Visual Style</text>
+  <text x="112" y="590" class="text">styles.css</text>
+  <text x="112" y="614" class="small">Responsive dark UI</text>
+  <rect x="90" y="665" width="220" height="160" class="note"/>
+  <text x="112" y="702" class="label">Frontend Boundary</text>
+  <text x="112" y="733" class="text">Only talks to HTTP APIs.</text>
+  <text x="112" y="758" class="text">Does not parse tools, call</text>
+  <text x="112" y="783" class="text">LM Studio, or touch Docker</text>
+  <text x="112" y="808" class="text">directly.</text>
+
+  <rect x="390" y="145" width="350" height="855" class="zone"/>
+  <text x="415" y="190" class="zone-title">Backend Runtime</text>
+  <text x="415" y="218" class="zone-subtitle">agent_app/backend + runtime</text>
+  <rect x="420" y="255" width="280" height="100" class="box-strong"/>
+  <text x="445" y="292" class="label">HTTP Server</text>
+  <text x="445" y="320" class="text">backend/http_server.py</text>
+  <text x="445" y="343" class="small">REST endpoints and static UI</text>
+  <rect x="420" y="385" width="280" height="125" class="box-strong"/>
+  <text x="445" y="422" class="label">AppState</text>
+  <text x="445" y="450" class="text">runtime/app_state.py</text>
+  <text x="445" y="474" class="small">Sessions, preferences, reminders,</text>
+  <text x="445" y="497" class="small">workspace maintenance</text>
+  <rect x="420" y="540" width="280" height="115" class="box"/>
+  <text x="445" y="577" class="label">Config + Prompts</text>
+  <text x="445" y="605" class="text">config.py, prompts.py</text>
+  <text x="445" y="629" class="small">System prompt and env settings</text>
+  <rect x="420" y="685" width="280" height="115" class="box-data"/>
+  <text x="445" y="722" class="label">Stores</text>
+  <text x="445" y="750" class="text">storage/, logging_store/</text>
+  <text x="445" y="774" class="small">Sessions, images, sqlite logs</text>
+
+  <rect x="790" y="145" width="350" height="855" class="zone"/>
+  <text x="815" y="190" class="zone-title">Orchestration</text>
+  <text x="815" y="218" class="zone-subtitle">agent_app/orchestration</text>
+  <rect x="820" y="255" width="280" height="120" class="box-strong"/>
+  <text x="845" y="292" class="label">AgentOrchestrator</text>
+  <text x="845" y="320" class="text">orchestrator.py</text>
+  <text x="845" y="344" class="small">Turn loop and control flow only</text>
+  <rect x="820" y="405" width="280" height="105" class="box"/>
+  <text x="845" y="442" class="label">Message Builder</text>
+  <text x="845" y="470" class="text">messages.py</text>
+  <text x="845" y="494" class="small">Normalize user, image, assistant</text>
+  <rect x="820" y="540" width="280" height="105" class="box"/>
+  <text x="845" y="577" class="label">Context Manager</text>
+  <text x="845" y="605" class="text">context_manager.py</text>
+  <text x="845" y="629" class="small">Prune and summarize context</text>
+  <rect x="820" y="675" width="280" height="145" class="note"/>
+  <text x="845" y="712" class="label">Orchestrator Boundary</text>
+  <text x="845" y="743" class="text">Does not parse tool args.</text>
+  <text x="845" y="768" class="text">Does not choose concrete</text>
+  <text x="845" y="793" class="text">tool implementation.</text>
+
+  <rect x="1190" y="145" width="540" height="855" class="zone"/>
+  <text x="1215" y="190" class="zone-title">Tool System + External Targets</text>
+  <text x="1215" y="218" class="zone-subtitle">agent_app/tools, prompts/skills, LM Studio, host, Docker</text>
+  <rect x="1220" y="255" width="210" height="115" class="box-strong"/>
+  <text x="1242" y="292" class="label">LM Adapter</text>
+  <text x="1242" y="320" class="text">llm/lmstudio_client.py</text>
+  <text x="1242" y="344" class="small">OpenAI-style chat calls</text>
+  <rect x="1490" y="255" width="210" height="115" class="box-external"/>
+  <text x="1512" y="292" class="label">LM Studio</text>
+  <text x="1512" y="320" class="text">Local model server</text>
+  <text x="1512" y="344" class="small">Text + images + tools</text>
+
+  <rect x="1220" y="415" width="210" height="125" class="box-strong"/>
+  <text x="1242" y="452" class="label">Dispatcher</text>
+  <text x="1242" y="480" class="text">tools/dispatcher.py</text>
+  <text x="1242" y="504" class="small">Parse model call</text>
+  <text x="1242" y="526" class="small">Extract unified input</text>
+  <rect x="1490" y="415" width="210" height="125" class="box-strong"/>
+  <text x="1512" y="452" class="label">Tool Registry</text>
+  <text x="1512" y="480" class="text">tools/registry.py</text>
+  <text x="1512" y="504" class="small">Enable, wrap, invoke</text>
+  <text x="1512" y="526" class="small">uniform result envelope</text>
+
+  <rect x="1220" y="585" width="210" height="155" class="box-tool"/>
+  <text x="1242" y="622" class="label">System Tools</text>
+  <text x="1242" y="650" class="text">tools/system/</text>
+  <text x="1242" y="674" class="small">skills, web search,</text>
+  <text x="1242" y="697" class="small">current info, reminders,</text>
+  <text x="1242" y="720" class="small">agent tool creation</text>
+  <rect x="1490" y="585" width="210" height="155" class="box-tool"/>
+  <text x="1512" y="622" class="label">Workspace Tools</text>
+  <text x="1512" y="650" class="text">tools/workspace/</text>
+  <text x="1512" y="674" class="small">read/write/edit files,</text>
+  <text x="1512" y="697" class="small">run host command,</text>
+  <text x="1512" y="720" class="small">capture webpage</text>
+
+  <rect x="1220" y="785" width="210" height="130" class="box-data"/>
+  <text x="1242" y="822" class="label">Skill Packages</text>
+  <text x="1242" y="850" class="text">prompts/skills/*</text>
+  <text x="1242" y="874" class="small">SKILL.md metadata,</text>
+  <text x="1242" y="897" class="small">references, scripts, assets</text>
+  <rect x="1490" y="785" width="210" height="130" class="box-external"/>
+  <text x="1512" y="822" class="label">Execution Targets</text>
+  <text x="1512" y="850" class="text">Windows host</text>
+  <text x="1512" y="874" class="text">Docker workspace</text>
+  <text x="1512" y="897" class="text">Web / browser</text>
+
+  <path class="edge" d="M310 305 C355 305 370 305 420 305"/>
+  <path class="edge" d="M700 448 C745 448 765 315 820 315"/>
+  <path class="edge-purple" d="M1100 315 C1148 315 1170 312 1220 312"/>
+  <path class="edge-purple" d="M1430 312 C1452 312 1465 312 1490 312"/>
+  <path class="edge" d="M1100 315 C1150 390 1168 455 1220 477"/>
+  <path class="edge-green" d="M1430 477 C1452 477 1465 477 1490 477"/>
+  <path class="edge-green" d="M1595 540 C1595 565 1325 560 1325 585"/>
+  <path class="edge-green" d="M1595 540 C1595 565 1595 560 1595 585"/>
+  <path class="edge-soft" d="M1325 740 C1325 762 1325 760 1325 785"/>
+  <path class="edge-soft" d="M1595 740 C1595 762 1595 760 1595 785"/>
+  <path class="edge-soft" d="M560 510 C560 655 560 685 560 685"/>
+  <path class="edge-soft" d="M960 645 C960 865 600 850 600 800"/>
+
+  <rect x="65" y="1040" width="1665" height="78" class="note"/>
+  <text x="92" y="1073" class="label">Primary Rule</text>
+  <text x="230" y="1073" class="text">The orchestrator owns turn sequencing only. Tool parsing and routing live in the dispatcher and registry. Concrete behavior lives in individual tool modules. Skill metadata lives in each SKILL.md package.</text>
+  <text x="92" y="1102" class="small">This keeps control flow, tool API, skill knowledge, persistent state, and execution targets separated.</text>
+</svg>

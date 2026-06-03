@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Thursday Agent Dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <h1>Thursday <span>Agent</span></h1>
+          <p id="workspacePath">docker://Thursday/workspace</p>
+        </div>
+        <div class="status-strip">
+          <span id="serverStatus" class="pill muted">LM Studio</span>
+          <button id="logsTab" class="icon-text trace-tab" type="button" aria-controls="logsDrawer" aria-expanded="false">Logs</button>
+          <button id="settingsTab" class="icon-button" type="button" aria-controls="settingsDrawer" aria-expanded="false" title="Settings" aria-label="Settings">Settings</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <aside class="sidebar">
+          <section class="panel sessions-panel">
+            <div class="section-header">
+              <h2>Sessions</h2>
+              <button id="newSessionBtn" class="compact-button" type="button">New</button>
+            </div>
+            <div id="sessionList" class="session-list"></div>
+          </section>
+
+          <section class="panel workspace-panel">
+            <div class="section-header">
+              <h2>Workspace</h2>
+              <span id="workspaceStatusBadge" class="mini-meta">checking</span>
+            </div>
+            <div class="workspace-facts">
+              <div><span>Container</span><strong id="workspaceContainer">Thursday</strong></div>
+              <div><span>Image</span><strong id="workspaceImage">ubuntu:24.04</strong></div>
+              <div><span>Workdir</span><strong id="workspaceWorkdir">/workspace</strong></div>
+            </div>
+            <p id="workspaceResetStatus" class="workspace-reset-status">Docker workspace health and target location.</p>
+          </section>
+
+          <section class="panel maintenance-panel">
+            <div class="section-header">
+              <h2>Maintenance</h2>
+              <span id="maintenanceStatus" class="mini-meta">ready</span>
+            </div>
+            <div class="maintenance-actions">
+              <button id="clearSessionsBtn" class="danger-button" type="button">Clear sessions</button>
+              <button id="clearLogsBtn" class="danger-button" type="button">Clear logs</button>
+              <button id="resetWorkspaceBtn" class="danger-button" type="button">Clear workspace</button>
+            </div>
+            <p class="maintenance-note">Actions are independent. Workspace clearing recreates only the Docker container.</p>
+          </section>
+
+          <section class="panel tools-control-panel">
+            <div class="section-header">
+              <h2>Tools</h2>
+              <span id="toolCount" class="mini-meta">0 enabled</span>
+            </div>
+            <div id="toolList" class="tool-list tool-control-list"></div>
+          </section>
+        </aside>
+
+        <div id="leftResizeHandle" class="layout-resize-handle left-layout-resize" role="separator" aria-orientation="vertical" aria-label="Resize left sidebar" tabindex="0"></div>
+
+        <section class="chat-shell">
+          <div id="chatLog" class="chat-log"></div>
+          <form id="chatForm" class="composer">
+            <div id="imagePreview" class="image-preview empty" aria-live="polite"></div>
+            <div class="composer-box">
+              <input id="imageInput" type="file" accept="image/*" multiple hidden>
+              <button id="attachImageBtn" class="icon-button attach-button" type="button" title="Attach images" aria-label="Attach images">+</button>
+              <textarea id="messageInput" placeholder="Enter your message" rows="1"></textarea>
+              <span class="composer-mode" aria-hidden="true">Thinking</span>
+              <button class="send-button" type="submit" aria-label="Send message">
+                <span aria-hidden="true">↑</span>
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <div id="rightResizeHandle" class="layout-resize-handle right-layout-resize" role="separator" aria-orientation="vertical" aria-label="Resize right sidebar" tabindex="0"></div>
+
+        <aside class="monitor">
+          <section class="panel timeline-panel">
+            <div class="section-header">
+              <h2>Timeline</h2>
+              <span id="timelineCount" class="mini-meta">0 events</span>
+            </div>
+            <div id="timeline" class="timeline"></div>
+          </section>
+
+          <section class="panel metrics">
+            <h2>Run</h2>
+            <div class="metric-row">
+              <span>Status</span>
+              <strong id="runStatus">idle</strong>
+            </div>
+            <div class="metric-row">
+              <span>Context</span>
+              <strong id="contextMetric">0%</strong>
+            </div>
+            <div class="meter"><span id="contextBar"></span></div>
+            <div class="metric-row">
+              <span>Tokens est.</span>
+              <strong id="tokenMetric">0</strong>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h2>Files</h2>
+            <div id="fileList" class="file-list empty">No files yet</div>
+          </section>
+        </aside>
+      </main>
+
+      <aside id="logsDrawer" class="trace-drawer logs-drawer" aria-hidden="true">
+        <div id="logsDrawerResizeHandle" class="drawer-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize logs panel" tabindex="0"></div>
+        <header class="trace-header">
+          <div>
+            <h2>Logs</h2>
+            <p id="logsMeta">No log view selected</p>
+          </div>
+          <button id="logsCloseBtn" type="button" aria-label="Close logs">Close</button>
+        </header>
+        <div class="log-tabs" role="tablist" aria-label="Log views">
+          <button class="active" data-log-view="trace" type="button">Trace</button>
+          <button data-log-view="raw" type="button">Raw</button>
+          <button data-log-view="http" type="button">HTTP</button>
+          <button data-log-view="app" type="button">App</button>
+        </div>
+        <div id="logsList" class="trace-list logs-list">
+          <div class="empty">Open a session to inspect logs.</div>
+        </div>
+      </aside>
+
+      <aside id="settingsDrawer" class="settings-drawer" aria-hidden="true">
+        <div id="settingsDrawerResizeHandle" class="drawer-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize settings panel" tabindex="0"></div>
+        <header class="trace-header">
+          <div>
+            <h2>Settings</h2>
+            <p>Saved automatically for future restarts.</p>
+          </div>
+          <button id="settingsCloseBtn" type="button" aria-label="Close settings">Close</button>
+        </header>
+        <div class="settings-body">
+          <section class="settings-section">
+            <h2>Model</h2>
+            <label>
+              LM Studio endpoint
+              <input id="endpointInput" />
+            </label>
+            <label>
+              Model
+              <input id="modelInput" />
+            </label>
+          </section>
+
+          <section class="settings-section">
+            <h2>Sampling</h2>
+            <label>
+              Temperature <span id="temperatureValue">0.6</span>
+              <input id="temperatureInput" type="range" min="0" max="1.2" step="0.05" />
+            </label>
+            <label>
+              Top-p <span id="topPValue">0.9</span>
+              <input id="topPInput" type="range" min="0.1" max="1" step="0.05" />
+            </label>
+            <div class="two-col">
+              <label>
+                Max tokens
+                <input id="maxTokensInput" type="number" min="256" max="32000" />
+              </label>
+              <label>
+                Context
+                <input id="contextInput" type="number" min="1024" max="100000" />
+              </label>
+            </div>
+            <label>
+              Max steps
+              <input id="maxStepsInput" type="number" min="1" max="30" />
+            </label>
+          </section>
+
+          <section class="settings-section">
+            <h2>Appearance</h2>
+            <label>
+              Accent color
+              <div class="color-setting">
+                <input id="themeColorInput" type="color" value="#9b63ff" aria-label="Accent color" />
+                <input id="themeColorTextInput" type="text" value="#9b63ff" maxlength="7" spellcheck="false" aria-label="Accent color hex value" />
+              </div>
+            </label>
+          </section>
+
+          <div class="settings-actions">
+            <span id="settingsSaveStatus" class="settings-save-status" role="status"></span>
+            <button id="restoreDefaultsBtn" type="button">Restore Defaults</button>
+            <button id="saveSettingsBtn" class="primary-action" type="button">Save</button>
+          </div>
+        </div>
+      </aside>
+
+      <div id="timelineDetailModal" class="modal-backdrop" aria-hidden="true">
+        <section class="timeline-detail-modal" role="dialog" aria-modal="true" aria-labelledby="timelineDetailTitle">
+          <header class="modal-header">
+            <div>
+              <h2 id="timelineDetailTitle">Timeline Event</h2>
+              <p id="timelineDetailMeta">No event selected</p>
+            </div>
+            <button id="timelineDetailCloseBtn" type="button" aria-label="Close timeline event">Close</button>
+          </header>
+          <div id="timelineDetailBody" class="timeline-detail-body"></div>
+        </section>
+      </div>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>

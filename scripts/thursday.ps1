@@ -76,7 +76,12 @@ if ([System.IO.Path]::IsPathRooted($LmStudioRawLogRaw)) {
     $LmStudioRawLog = Join-Path $LogDir $LmStudioRawLogRaw
 }
 $ServerScript = Join-Path $ScriptDir "server.py"
-$LocalPython = Join-Path $Root ".conda\python.exe"
+$LocalPythonRaw = Config-Value "LOCAL_PYTHON" ".venv\Scripts\python.exe"
+if ([System.IO.Path]::IsPathRooted($LocalPythonRaw)) {
+    $LocalPython = $LocalPythonRaw
+} else {
+    $LocalPython = Join-Path $Root $LocalPythonRaw
+}
 
 function Ensure-LogDir {
     New-Item -ItemType Directory -Force -Path $LogDir | Out-Null

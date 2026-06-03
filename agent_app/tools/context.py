@@ -5,6 +5,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
+import re
 
 from ..config import AppConfig
 from ..reminders import ReminderStore
@@ -24,7 +25,13 @@ def quote_shell(value: str) -> str:
 
 
 def workspace_relative_path(config: AppConfig, value: str) -> str:
-    normalized = str(value or ".").replace("\\", "/").strip()
+    raw = str(value or ".").strip()
+    if re.match(r"^[A-Za-z]:([\\/]|$)", raw):
+        raise ValueError(
+            "Workspace file tools only accept Docker workspace-relative paths. "
+            "This looks like a Windows host path; use run_command with PowerShell for host files."
+        )
+    normalized = raw.replace("\\", "/")
     workdir = config.docker_workdir.rstrip("/") or "/workspace"
     if normalized == workdir or normalized == f"{workdir}/":
         return "."

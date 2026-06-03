@@ -11,7 +11,10 @@ def utc_now() -> str:
 
 
 def estimate_tokens(value: str) -> int:
-    return max(1, len(value) // 4)
+    # LM Studio raw logs for tool-heavy JSON conversations trend close to
+    # two characters per token. Use the conservative estimate so context
+    # pruning starts before the model is already out of headroom.
+    return max(1, len(value) // 2)
 
 
 def clamp_text(value: str, limit: int = 4000) -> str:

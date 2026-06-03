@@ -6,16 +6,14 @@ from typing import Any
 from .config import AppConfig
 
 
-def render_system_prompt(config: AppConfig, tool_names: str, project_state: dict[str, str]) -> str:
+def render_system_prompt(config: AppConfig) -> str:
     return render_prompt(
         config.prompt_dir / "thursday.md",
         {
             "agent_name": config.agent_name,
             "docker_container_name": config.docker_container_name,
             "docker_workdir": config.docker_workdir,
-            "tool_names": tool_names,
             "workspace_label": f"docker://{config.docker_container_name}{config.docker_workdir}",
-            **project_state,
         },
     )
 

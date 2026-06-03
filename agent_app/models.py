@@ -56,6 +56,7 @@ class Session:
     updated_at: str = field(default_factory=utc_now)
     status: str = "idle"
     messages: list[dict[str, Any]] = field(default_factory=list)
+    message_backup: list[dict[str, Any]] = field(default_factory=list)
     visible_messages: list[dict[str, Any]] = field(default_factory=list)
     events: list[Event] = field(default_factory=list)
     summary: str = ""
@@ -64,6 +65,12 @@ class Session:
     recent_errors: list[str] = field(default_factory=list)
     current_goal: str = ""
     token_estimate: int = 0
+    last_response_id: str = ""
+    response_chain_valid: bool = False
+    response_anchor_message_count: int = 0
+    response_chain_model: str = ""
+    response_chain_endpoint: str = ""
+    response_chain_invalid_reason: str = ""
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
     def add_event(self, event_type: str, message: str, **data: Any) -> None:
@@ -89,6 +96,14 @@ class Session:
                 "current_goal": self.current_goal,
                 "token_estimate": self.token_estimate,
                 "context_usage": min(1.0, self.token_estimate / max(1, self.settings.context_window)),
+                "response_chain": {
+                    "valid": self.response_chain_valid,
+                    "last_response_id": self.last_response_id,
+                    "anchor_message_count": self.response_anchor_message_count,
+                    "model": self.response_chain_model,
+                    "endpoint": self.response_chain_endpoint,
+                    "invalid_reason": self.response_chain_invalid_reason,
+                },
             }
 
     def to_trace(self) -> dict[str, Any]:
@@ -101,5 +116,12 @@ class Session:
                 "token_estimate": self.token_estimate,
                 "context_window": self.settings.context_window,
                 "messages": self.messages,
+                "message_backup_count": len(self.message_backup),
                 "message_count": len(self.messages),
+                "last_response_id": self.last_response_id,
+                "response_chain_valid": self.response_chain_valid,
+                "response_anchor_message_count": self.response_anchor_message_count,
+                "response_chain_model": self.response_chain_model,
+                "response_chain_endpoint": self.response_chain_endpoint,
+                "response_chain_invalid_reason": self.response_chain_invalid_reason,
             }

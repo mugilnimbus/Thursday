@@ -67,6 +67,7 @@ class AppConfig:
     static_dir: Path
     prompt_dir: Path
     visual_check_dir: Path
+    image_upload_dir: Path
     log_dir: Path
     log_db_file: Path
     lmstudio_raw_log_file: Path
@@ -88,11 +89,13 @@ class AppConfig:
     default_max_steps: int
     default_enable_thinking: bool
     default_stream: bool
+    use_responses_api: bool
     lmstudio_raw_log_enabled: bool
     llm_timeout_seconds: int
     llm_stop_sequences: list[str]
     browser_executable: str
     status_timeout_seconds: int
+    model_status_cache_seconds: int
     tool_max_output_chars: int
     tool_max_error_chars: int
     tool_observation_max_chars: int
@@ -125,9 +128,10 @@ class AppConfig:
             preferences_file = log_dir / preferences_file
         return cls(
             root_dir=ROOT_DIR,
-            static_dir=env_path("STATIC_DIR", "web"),
+            static_dir=env_path("STATIC_DIR", "frontend"),
             prompt_dir=env_path("PROMPT_DIR", "prompts"),
             visual_check_dir=env_path("VISUAL_CHECK_DIR", "logs/visual_checks"),
+            image_upload_dir=env_path("IMAGE_UPLOAD_DIR", "logs/images"),
             log_dir=log_dir,
             log_db_file=log_db_file.resolve(),
             lmstudio_raw_log_file=raw_log_file.resolve(),
@@ -149,11 +153,13 @@ class AppConfig:
             default_max_steps=env_int("DEFAULT_MAX_STEPS", 8),
             default_enable_thinking=env_bool("DEFAULT_ENABLE_THINKING", True),
             default_stream=env_bool("DEFAULT_STREAM", False),
+            use_responses_api=env_bool("USE_RESPONSES_API", True),
             lmstudio_raw_log_enabled=env_bool("LMSTUDIO_RAW_LOG_ENABLED", True),
             llm_timeout_seconds=env_int("LLM_TIMEOUT_SECONDS", 180),
             llm_stop_sequences=env_list("LLM_STOP_SEQUENCES", ["<|im_end|>", "<|observation|>", "<|end|>"]),
             browser_executable=env_str("BROWSER_EXECUTABLE", ""),
             status_timeout_seconds=env_int("STATUS_TIMEOUT_SECONDS", 5),
+            model_status_cache_seconds=env_int("MODEL_STATUS_CACHE_SECONDS", 30),
             tool_max_output_chars=env_int("TOOL_MAX_OUTPUT_CHARS", default_context_window),
             tool_max_error_chars=env_int("TOOL_MAX_ERROR_CHARS", default_context_window),
             tool_observation_max_chars=env_int("TOOL_OBSERVATION_MAX_CHARS", default_context_window),
@@ -169,7 +175,7 @@ class AppConfig:
 
     def public(self) -> dict[str, object]:
         data = asdict(self)
-        for key in ("root_dir", "static_dir", "prompt_dir", "visual_check_dir", "log_dir", "log_db_file", "lmstudio_raw_log_file", "preferences_file"):
+        for key in ("root_dir", "static_dir", "prompt_dir", "visual_check_dir", "image_upload_dir", "log_dir", "log_db_file", "lmstudio_raw_log_file", "preferences_file"):
             data[key] = str(data[key])
         data["workspace"] = {
             "type": "docker",

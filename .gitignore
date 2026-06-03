@@ -93,3 +93,5 @@ prompts/versions
 *.bak
 *.swp
 ~$*
+.python-version
+uv.lock

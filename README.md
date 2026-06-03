@@ -191,18 +191,20 @@ The enabled tools are controlled from the dashboard.
 
 Current tool set:
 
-- `inspect_workspace`: inspect files and tree inside the Docker workspace.
 - `read_file`: read a UTF-8 text file from the Docker workspace.
 - `write_file`: create or overwrite a UTF-8 text file in the Docker workspace.
 - `edit_file`: replace exact text in an existing file and return a unified diff.
-- `search_workspace`: search text files in the Docker workspace.
-- `run_command`: run a Bash command inside `/workspace`.
+- `list_skills`: list available skill package metadata from `SKILL.md` frontmatter.
+- `load_skill`: load one relevant skill package body as a user-role instruction message.
+- `read_skill_resource`: read one bundled skill resource from `references/`, `scripts/`, or `assets/`.
+- `run_command`: run a Windows PowerShell or cmd command exactly as provided. Use explicit `docker exec -i Thursday bash -lc "cd /workspace && ..."` for Docker workspace inspection, search, tests, builds, and installs.
 - `web_search`: search the web for current references.
-- `inspect_webpage`: open a URL or workspace HTML file in headless Chrome and capture diagnostics.
+- `capture_webpage`: capture a 2K or 4K screenshot of a URL, local Windows HTML file, Docker workspace HTML file, or search results page and pass the image to the LLM without DOM text extraction.
 - `create_reminder`: create a scheduled reminder that always runs as a future LLM turn.
 - `list_reminders`: list stored reminders.
 - `update_reminder`: update a reminder schedule or task.
 - `delete_reminder`: delete a reminder.
+- `create_agent_tool`: create or update a host-side Thursday tool module.
 
 ## Reminders
 
@@ -290,27 +292,35 @@ Use:
 ## Project Structure
 
 ```text
-agent_app/              Backend application code
+agent_app/              Python application code
+frontend/               Dashboard frontend
 prompts/                Agent and summarizer prompts
 scripts/                Server entrypoint and control scripts
-web/                    Dashboard frontend
 requirements.txt        Python dependencies
 .env.example            Example runtime configuration
 .gitignore              Local/runtime ignore rules
 ```
 
-Key backend files:
+Key component files:
 
 ```text
-scripts/server.py              Starts the dashboard HTTP server
-scripts/thursday.ps1           Start/stop/restart/status/logs/workspace control
-agent_app/config.py            Loads .env config
-agent_app/http_app.py          Serves API and dashboard files
-agent_app/orchestrator.py      Runs the agent loop
-agent_app/tools.py             Defines and executes tools
-agent_app/llm_client.py        Calls LM Studio
-agent_app/session_store.py     Persists sessions in SQLite
-agent_app/sqlite_logging.py    Stores app, HTTP, server, and raw LLM logs
+scripts/server.py                         Starts the dashboard HTTP server
+scripts/thursday.ps1                      Start/stop/restart/status/logs/workspace control
+agent_app/ARCHITECTURE.md                 Component boundaries and wiring rules
+agent_app/config.py                       Loads .env config
+agent_app/backend/http_server.py          Serves API and dashboard files
+agent_app/runtime/app_state.py            Wires sessions, reminders, preferences, and orchestration
+agent_app/orchestration/orchestrator.py   Runs agent turn control flow
+agent_app/orchestration/messages.py       Normalizes user/model/image messages
+agent_app/orchestration/context_manager.py Manages context pruning and summaries
+agent_app/skills/                         Discovers skill packages and frontmatter metadata
+agent_app/tools/dispatcher.py             Parses model tool calls and invokes registered tools
+agent_app/tools/results.py                Shapes tool results and fallback summaries
+agent_app/tools/registry.py               Discovers and executes tool modules
+agent_app/llm/lmstudio_client.py          Calls LM Studio
+agent_app/storage/session_store.py        Persists sessions in SQLite
+agent_app/logging_store/sqlite_logs.py    Stores app, HTTP, server, and raw LLM logs
+prompts/skills/                           Skill packages with SKILL.md, references, scripts, and assets
 ```
 
 ## Development
