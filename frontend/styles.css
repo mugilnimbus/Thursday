@@ -1145,6 +1145,11 @@ label {
   box-shadow: 0 0 20px rgba(var(--accent-rgb), 0.46);
 }
 
+.token-metric-row {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
 .gui-region-control {
   margin: 10px 0 12px;
   padding: 10px;
