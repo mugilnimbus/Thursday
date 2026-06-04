@@ -19,7 +19,6 @@ class SkillSpec:
     path: Path
     body: str
     resources: list[str]
-    always_active: bool = False
 
     def to_catalog_item(self) -> dict[str, Any]:
         return {
@@ -27,7 +26,6 @@ class SkillSpec:
             "description": self.description,
             "what_it_does": self.what_it_does,
             "when_to_use": self.when_to_use,
-            "always_active": self.always_active,
             "resources": self.resources,
         }
 
@@ -47,10 +45,10 @@ class SkillCatalog:
             if not skill_file.exists():
                 continue
             specs.append(self.read_spec(skill_file))
-        return sorted(specs, key=lambda spec: (not spec.always_active, spec.name))
+        return sorted(specs, key=lambda spec: spec.name)
 
     def loadable_specs(self) -> list[SkillSpec]:
-        return [spec for spec in self.specs() if not spec.always_active]
+        return self.specs()
 
     def names(self) -> list[str]:
         return [spec.name for spec in self.loadable_specs()]
@@ -65,8 +63,7 @@ class SkillCatalog:
             "Available skill metadata from SKILL.md frontmatter. Each description states what the skill does and when to use it:",
         ]
         for spec in self.specs():
-            suffix = " (always active)" if spec.always_active else ""
-            lines.append(f"- `{spec.name}`{suffix}: {spec.description}")
+            lines.append(f"- `{spec.name}`: {spec.description}")
             lines.append(f"  What it does: {spec.what_it_does}")
             lines.append(f"  When to use: {spec.when_to_use}")
             if spec.resources:
@@ -99,7 +96,6 @@ class SkillCatalog:
             path=skill_file,
             body=body.strip(),
             resources=self.resources_for(skill_file.parent),
-            always_active=name == "tool_operations",
         )
 
     def read_resource(self, skill_name: str, resource_path: str) -> dict[str, Any]:

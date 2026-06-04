@@ -6,7 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from ..models import AgentSettings, Event, Session
+from ..runtime.models import AgentSettings, Event, Session
 from ..utils import utc_now
 
 
@@ -169,3 +169,4 @@ class SessionStore:
             response_chain_endpoint=str(payload.get("response_chain_endpoint") or ""),
             response_chain_invalid_reason=str(payload.get("response_chain_invalid_reason") or ""),
         )
+

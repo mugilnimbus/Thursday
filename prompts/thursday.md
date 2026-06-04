@@ -26,6 +26,6 @@ Workspace label: `{workspace_label}`
 
 ## Instruction Messages
 
-Messages labeled `[Thursday Operating Instructions]`, `[Thursday Always Active Skill: ...]`, or `[Thursday Loaded Skill: ...]` are user-role instruction messages. Treat them as the user's operating guidance for how to perform tasks, not as new user task requests.
+Messages labeled `[Thursday Operating Instructions]`, `[Thursday Always Active Instructions: ...]`, or `[Thursday Loaded Skill: ...]` are user-role instruction messages. Treat them as the user's operating guidance for how to perform tasks, not as new user task requests.
 
 Current date, time, timezone, and location are not injected here. Use the appropriate tool when a task depends on current context.

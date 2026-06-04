@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from ..config import AppConfig
+from ..runtime.config import AppConfig
 from ..storage.image_store import image_url
 from ..utils import clamp_text
 from .dispatcher import ToolExecution
@@ -35,7 +35,10 @@ class ToolResultPresenter:
 
     def build_observation(self, execution: ToolExecution) -> ToolObservation:
         stored_result = self.strip_llm_images(execution.result)
-        result_text = json.dumps(self.llm_visible_result(execution.call.name, stored_result), indent=2)
+        result_text = clamp_text(
+            json.dumps(self.llm_visible_result(execution.call.name, stored_result), indent=2),
+            self.effective_observation_limit(),
+        )
         output = self.output(stored_result)
         return ToolObservation(
             name=execution.call.name,
@@ -53,6 +56,7 @@ class ToolResultPresenter:
         return self.llm_visible_result(tool_name, result)
 
     def llm_visible_result(self, tool_name: str, result: dict[str, Any]) -> dict[str, Any]:
+        result = self.compact_result_payload(result)
         if tool_name != "load_skill" or not result.get("ok"):
             return result
         output = self.output(result)
@@ -65,6 +69,50 @@ class ToolResultPresenter:
         compact = dict(result)
         compact["output"] = compact_output
         return compact
+
+    def compact_result_payload(self, result: dict[str, Any]) -> dict[str, Any]:
+        compact = self.compact_value(result)
+        if isinstance(compact, dict):
+            return compact
+        return {"ok": False, "error": "Tool result had an unexpected non-object payload.", "output": {"value": compact}}
+
+    def compact_value(self, value: Any, depth: int = 0) -> Any:
+        if isinstance(value, str):
+            return clamp_text(value, self.string_limit_for(depth))
+        if isinstance(value, dict):
+            if depth >= 8:
+                return {"truncated": "nested object omitted after depth limit"}
+            compact_dict: dict[str, Any] = {}
+            for index, (key, item) in enumerate(value.items()):
+                if index >= 80:
+                    compact_dict["truncated_keys"] = f"{len(value) - index} additional keys omitted"
+                    break
+                compact_dict[str(key)] = self.compact_value(item, depth + 1)
+            return compact_dict
+        if isinstance(value, list):
+            if depth >= 8:
+                return [f"nested list omitted after depth limit; original length {len(value)}"]
+            limit = 24 if depth <= 1 else 8
+            compact_list = [self.compact_value(item, depth + 1) for item in value[:limit]]
+            if len(value) > limit:
+                compact_list.append(f"... truncated {len(value) - limit} additional items")
+            return compact_list
+        return value
+
+    def string_limit_for(self, depth: int) -> int:
+        base = self.effective_output_limit()
+        if depth <= 2:
+            return base
+        return min(base, 1000)
+
+    def effective_output_limit(self) -> int:
+        return min(max(self.config.tool_max_output_chars, 1000), 16000)
+
+    def effective_error_limit(self) -> int:
+        return min(max(self.config.tool_max_error_chars, 1000), 6000)
+
+    def effective_observation_limit(self) -> int:
+        return min(max(self.config.tool_observation_max_chars, 2000), 24000)
 
     def tool_message(self, observation: ToolObservation) -> dict[str, Any]:
         message = {
@@ -105,7 +153,7 @@ class ToolResultPresenter:
         summary = self.output_summary(output)
         if summary:
             return f"`{observation.name}` completed successfully.\n\n{summary}"
-        return f"`{observation.name}` completed successfully:\n```json\n{clamp_text(json.dumps(output, indent=2), self.config.default_context_window)}\n```"
+        return f"`{observation.name}` completed successfully:\n```json\n{clamp_text(json.dumps(output, indent=2), self.effective_observation_limit())}\n```"
 
     def fallback_empty_response(self) -> str:
         return (
@@ -162,8 +210,8 @@ class ToolResultPresenter:
             return ""
         error = result.get("error")
         if isinstance(error, dict):
-            return str(error.get("message") or json.dumps(error, indent=2))
-        return str(error or json.dumps(result, indent=2))
+            return clamp_text(str(error.get("message") or json.dumps(error, indent=2)), self.effective_error_limit())
+        return clamp_text(str(error or json.dumps(result, indent=2)), self.effective_error_limit())
 
     def output(self, result: dict[str, Any]) -> dict[str, Any]:
         output = result.get("output")
@@ -183,9 +231,9 @@ class ToolResultPresenter:
             stdout = str(output.get("stdout") or "").strip()
             stderr = str(output.get("stderr") or "").strip()
             if stdout:
-                pieces.append(f"stdout:\n```text\n{clamp_text(stdout, self.config.default_context_window)}\n```")
+                pieces.append(f"stdout:\n```text\n{clamp_text(stdout, self.effective_output_limit())}\n```")
             if stderr:
-                pieces.append(f"stderr:\n```text\n{clamp_text(stderr, self.config.default_context_window)}\n```")
+                pieces.append(f"stderr:\n```text\n{clamp_text(stderr, self.effective_error_limit())}\n```")
             return "\n\n".join(pieces)
         return ""
 
@@ -212,3 +260,4 @@ class ToolResultPresenter:
             if stripped.startswith("#"):
                 return stripped
         return ""
+

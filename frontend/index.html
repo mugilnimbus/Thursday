@@ -1,18 +1,29 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <!-- Basic document metadata. Keep the stylesheet path as /styles.css because
+         the Python server serves the frontend from the web root. -->
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Thursday Agent Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lavishly+Yours&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+    <!-- Root app shell. The CSS grid inside .app creates a fixed top bar and a
+         full-height dashboard layout below it. -->
     <div class="app">
+      <!-- Top bar: brand on the left, LM Studio status/actions on the right. -->
       <header class="topbar">
+        <!-- Brand text. #workspacePath is kept for JavaScript compatibility but
+             hidden by CSS in the current visual design. -->
         <div class="brand">
           <h1>Thursday <span>Agent</span></h1>
           <p id="workspacePath">docker://Thursday/workspace</p>
         </div>
+        <!-- Status/actions area. app.js updates #serverStatus from /api/status. -->
         <div class="status-strip">
           <span id="serverStatus" class="pill muted">LM Studio</span>
           <button id="logsTab" class="icon-text trace-tab" type="button" aria-controls="logsDrawer" aria-expanded="false">Logs</button>
@@ -20,8 +31,12 @@
         </div>
       </header>
 
+      <!-- Main dashboard grid: left sidebar, resize handle, chat, resize handle,
+           right monitor. Widths are controlled by CSS variables and app.js. -->
       <main class="layout">
+        <!-- Left sidebar: sessions, workspace, maintenance, and tool toggles. -->
         <aside class="sidebar">
+          <!-- Session list. app.js renders session rows into #sessionList. -->
           <section class="panel sessions-panel">
             <div class="section-header">
               <h2>Sessions</h2>
@@ -30,6 +45,7 @@
             <div id="sessionList" class="session-list"></div>
           </section>
 
+          <!-- Docker workspace health/status shown by /api/workspace. -->
           <section class="panel workspace-panel">
             <div class="section-header">
               <h2>Workspace</h2>
@@ -43,6 +59,8 @@
             <p id="workspaceResetStatus" class="workspace-reset-status">Docker workspace health and target location.</p>
           </section>
 
+          <!-- Maintenance actions. Each button calls a backend endpoint after a
+               confirmation dialog. -->
           <section class="panel maintenance-panel">
             <div class="section-header">
               <h2>Maintenance</h2>
@@ -56,6 +74,7 @@
             <p class="maintenance-note">Actions are independent. Workspace clearing recreates only the Docker container.</p>
           </section>
 
+          <!-- Tool toggles. app.js loads tool definitions from /api/tools. -->
           <section class="panel tools-control-panel">
             <div class="section-header">
               <h2>Tools</h2>
@@ -65,12 +84,17 @@
           </section>
         </aside>
 
+        <!-- Draggable separator for resizing the left sidebar. -->
         <div id="leftResizeHandle" class="layout-resize-handle left-layout-resize" role="separator" aria-orientation="vertical" aria-label="Resize left sidebar" tabindex="0"></div>
 
+        <!-- Center chat area. #chatLog is rendered by app.js; #chatForm submits
+             messages and attached images. -->
         <section class="chat-shell">
           <div id="chatLog" class="chat-log"></div>
           <form id="chatForm" class="composer">
+            <!-- Image chips appear here before a message is sent. -->
             <div id="imagePreview" class="image-preview empty" aria-live="polite"></div>
+            <!-- Floating glass input capsule. CSS controls most of this visual. -->
             <div class="composer-box">
               <input id="imageInput" type="file" accept="image/*" multiple hidden>
               <button id="attachImageBtn" class="icon-button attach-button" type="button" title="Attach images" aria-label="Attach images">+</button>
@@ -83,9 +107,13 @@
           </form>
         </section>
 
+        <!-- Draggable separator for resizing the right monitor sidebar. -->
         <div id="rightResizeHandle" class="layout-resize-handle right-layout-resize" role="separator" aria-orientation="vertical" aria-label="Resize right sidebar" tabindex="0"></div>
 
+        <!-- Right monitor: timeline, run metrics, and modified files. -->
         <aside class="monitor">
+          <!-- Timeline is a compact activity feed. Clicking an event opens the
+               detail modal near the bottom of this file. -->
           <section class="panel timeline-panel">
             <div class="section-header">
               <h2>Timeline</h2>
@@ -94,6 +122,7 @@
             <div id="timeline" class="timeline"></div>
           </section>
 
+          <!-- Run metrics for the current session. -->
           <section class="panel metrics">
             <h2>Run</h2>
             <div class="metric-row">
@@ -105,12 +134,46 @@
               <strong id="contextMetric">0%</strong>
             </div>
             <div class="meter"><span id="contextBar"></span></div>
+            <div class="gui-region-control">
+              <div class="section-header">
+                <h2>GUI For LLM</h2>
+                <span id="guiRegionStatus" class="mini-meta">loading</span>
+              </div>
+              <label>
+                Screen
+                <select id="guiDisplaySelect"></select>
+              </label>
+              <div class="gui-region-grid">
+                <label>
+                  X
+                  <input id="guiRegionX" type="number" min="0" step="1" />
+                </label>
+                <label>
+                  Y
+                  <input id="guiRegionY" type="number" min="0" step="1" />
+                </label>
+                <label>
+                  W
+                  <input id="guiRegionWidth" type="number" min="20" step="1" />
+                </label>
+                <label>
+                  H
+                  <input id="guiRegionHeight" type="number" min="20" step="1" />
+                </label>
+              </div>
+              <div class="gui-region-actions">
+                <button id="saveGuiRegionBtn" type="button">Set Region</button>
+                <button id="previewGuiRegionBtn" type="button">Preview</button>
+              </div>
+              <img id="guiRegionPreview" class="gui-region-preview" alt="GUI region preview" hidden />
+            </div>
             <div class="metric-row">
               <span>Tokens est.</span>
               <strong id="tokenMetric">0</strong>
             </div>
           </section>
 
+          <!-- File list for paths changed by the active session. -->
           <section class="panel">
             <h2>Files</h2>
             <div id="fileList" class="file-list empty">No files yet</div>
@@ -118,7 +181,9 @@
         </aside>
       </main>
 
+      <!-- Logs drawer. Hidden off-canvas until body.logs-open is set. -->
       <aside id="logsDrawer" class="trace-drawer logs-drawer" aria-hidden="true">
+        <!-- Drag handle for logs drawer width. -->
         <div id="logsDrawerResizeHandle" class="drawer-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize logs panel" tabindex="0"></div>
         <header class="trace-header">
           <div>
@@ -127,6 +192,7 @@
           </div>
           <button id="logsCloseBtn" type="button" aria-label="Close logs">Close</button>
         </header>
+        <!-- Log view tabs. app.js switches content based on data-log-view. -->
         <div class="log-tabs" role="tablist" aria-label="Log views">
           <button class="active" data-log-view="trace" type="button">Trace</button>
           <button data-log-view="raw" type="button">Raw</button>
@@ -138,7 +204,9 @@
         </div>
       </aside>
 
+      <!-- Settings drawer. Hidden off-canvas until body.settings-open is set. -->
       <aside id="settingsDrawer" class="settings-drawer" aria-hidden="true">
+        <!-- Drag handle for settings drawer width. -->
         <div id="settingsDrawerResizeHandle" class="drawer-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize settings panel" tabindex="0"></div>
         <header class="trace-header">
           <div>
@@ -148,6 +216,7 @@
           <button id="settingsCloseBtn" type="button" aria-label="Close settings">Close</button>
         </header>
         <div class="settings-body">
+          <!-- Model connection settings used by /api/status and /api/chat. -->
           <section class="settings-section">
             <h2>Model</h2>
             <label>
@@ -160,6 +229,7 @@
             </label>
           </section>
 
+          <!-- Sampling/runtime controls sent with each chat request. -->
           <section class="settings-section">
             <h2>Sampling</h2>
             <label>
@@ -186,6 +256,7 @@
             </label>
           </section>
 
+          <!-- Appearance controls. app.js writes the selected color into CSS vars. -->
           <section class="settings-section">
             <h2>Appearance</h2>
             <label>
@@ -197,6 +268,7 @@
             </label>
           </section>
 
+          <!-- Sticky settings footer with save/restore controls. -->
           <div class="settings-actions">
             <span id="settingsSaveStatus" class="settings-save-status" role="status"></span>
             <button id="restoreDefaultsBtn" type="button">Restore Defaults</button>
@@ -205,6 +277,8 @@
         </div>
       </aside>
 
+      <!-- Timeline event modal. app.js fills #timelineDetailBody with JSON/details
+           when a timeline item is clicked. -->
       <div id="timelineDetailModal" class="modal-backdrop" aria-hidden="true">
         <section class="timeline-detail-modal" role="dialog" aria-modal="true" aria-labelledby="timelineDetailTitle">
           <header class="modal-header">
@@ -218,6 +292,8 @@
         </section>
       </div>
     </div>
+    <!-- Browser behavior for the dashboard. Keep this last so the DOM exists
+         before app.js calls document.getElementById(...). -->
     <script src="/app.js"></script>
   </body>
 </html>

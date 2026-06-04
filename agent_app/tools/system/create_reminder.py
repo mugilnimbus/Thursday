@@ -24,7 +24,7 @@ TOOL_DEFINITION = {
             "type": "object",
             "properties": {
                 "title": {"type": "string", "description": "Short reminder name."},
-                "prompt": {"type": "string", "description": "The exact task Thursday should perform when due, e.g. 'Check today's Dublin weather and tell me before work'."},
+                "prompt": {"type": "string", "description": "The exact task Thursday should perform when due, e.g. 'Check today's weather for the configured location and summarize it before work'."},
                 "schedule": {
                     "type": "string",
                     "description": "Schedule mode: once, every_minutes, hourly, daily, weekly, or monthly.",

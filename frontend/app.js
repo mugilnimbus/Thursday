@@ -1,3 +1,17 @@
+// ============================================================================
+// Thursday dashboard frontend
+// ----------------------------------------------------------------------------
+// This file owns the browser-side behavior for the dashboard:
+// - keeps local UI state
+// - talks to the Python server through /api/* endpoints
+// - renders sessions, chat messages, timeline events, logs, tools, and settings
+// - stores purely visual preferences such as panel widths and accent color
+//
+// When modifying the UI, start by finding the matching section header below.
+// ============================================================================
+
+// Central browser state. This is not persisted directly; the server persists
+// sessions/preferences, while this object remembers the current UI view.
 const state = {
   sessionId: null,
   sessions: [],
@@ -23,12 +37,23 @@ const state = {
   selectedTimelineEvent: null,
   pendingImages: [],
   themeColor: "#9b63ff",
+  guiForLlm: {
+    displays: [],
+    activeRegion: null,
+    previewPath: "",
+  },
 };
 
+// Tiny DOM helper. Example: $("chatLog") means document.getElementById("chatLog").
 const $ = (id) => document.getElementById(id);
+
+// Browser-local key for saved panel widths. This only affects this browser.
 const PANEL_WIDTH_STORAGE_KEY = "thursday.panelWidths";
+
+// Used when preferences have no saved accent color or the typed color is invalid.
 const DEFAULT_THEME_COLOR = "#9b63ff";
 
+// Default side/drawer widths before the user drags resize handles.
 const PANEL_WIDTH_DEFAULTS = {
   left: 300,
   right: 360,
@@ -36,6 +61,7 @@ const PANEL_WIDTH_DEFAULTS = {
   settings: 440,
 };
 
+// CSS custom properties controlled by the resize code.
 const PANEL_WIDTH_VARS = {
   left: "--left-panel-width",
   right: "--right-panel-width",
@@ -43,6 +69,8 @@ const PANEL_WIDTH_VARS = {
   settings: "--settings-drawer-width",
 };
 
+// Read the current settings drawer controls and convert them into the payload
+// shape expected by the backend.
 function settingsFromUi() {
   ensureRequiredToolsEnabled();
   return {
@@ -58,12 +86,15 @@ function settingsFromUi() {
   };
 }
 
+// Read just the appearance/theme settings from the UI.
 function themeFromUi() {
   return {
     accent_color: normalizeHexColor($("themeColorTextInput")?.value || state.themeColor || DEFAULT_THEME_COLOR),
   };
 }
 
+// Small JSON API helper. All dashboard server endpoints return JSON; failed
+// requests throw so callers can show a status message.
 async function api(path, options = {}) {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json" },
@@ -76,6 +107,12 @@ async function api(path, options = {}) {
   return response.json();
 }
 
+// ============================================================================
+// Sessions, Chat, Files, and Timeline
+// ============================================================================
+
+// Render the left sidebar list of conversations. Each row has a main button for
+// selecting the session and a separate delete button.
 function renderSessions() {
   const list = $("sessionList");
   list.innerHTML = "";
@@ -110,7 +147,7 @@ function renderSessions() {
       deleteButton.type = "button";
       deleteButton.title = `Delete ${session.title}`;
       deleteButton.setAttribute("aria-label", `Delete ${session.title}`);
-      deleteButton.textContent = "Delete";
+      deleteButton.textContent = "×";
       deleteButton.addEventListener("click", (event) => {
         event.stopPropagation();
         deleteSession(session);
@@ -121,6 +158,9 @@ function renderSessions() {
     });
 }
 
+// Render the active chat session into the middle column. The signature check
+// prevents rewriting the chat DOM while nothing meaningful changed, which also
+// protects text selection while the polling loop is running.
 function renderSession(session) {
   if (!session) return;
   const chat = $("chatLog");
@@ -166,6 +206,8 @@ function renderSession(session) {
   renderTimeline(session);
 }
 
+// Render the "Files" panel in the right sidebar from the session's modified
+// file list.
 function renderFiles(session) {
   const files = $("fileList");
   files.innerHTML = "";
@@ -183,6 +225,9 @@ function renderFiles(session) {
   });
 }
 
+// Render recent orchestrator events in reverse chronological order. Only the
+// latest 36 are shown in the sidebar; full details are still available in the
+// modal opened by clicking an event.
 function renderTimeline(session) {
   const timeline = $("timeline");
   const allEvents = session.events || [];
@@ -226,6 +271,7 @@ function renderTimeline(session) {
   });
 }
 
+// Convert backend event types into compact UI labels.
 function timelineTypeLabel(type) {
   const labels = {
     user: "USER",
@@ -244,12 +290,18 @@ function timelineTypeLabel(type) {
   return labels[type] || String(type).replaceAll("_", " ").toUpperCase();
 }
 
+// Pick a few useful details to show inline under a timeline event. The complete
+// event JSON is still shown in the detail modal.
 function timelineDetails(event) {
   const data = event.data || {};
   const details = [];
   if (data.tool) details.push(`tool: ${data.tool}`);
   if (data.model) details.push(`model: ${data.model}`);
   if (data.token_estimate !== undefined) details.push(`tokens: ${data.token_estimate}`);
+  if (data.before_tokens !== undefined && data.after_tokens !== undefined) details.push(`${data.before_tokens} -> ${data.after_tokens} tokens`);
+  if (data.summary_chars !== undefined) details.push(`summary: ${data.summary_chars} chars`);
+  if (data.session_summary_file) details.push(`session summary: ${data.session_summary_file}`);
+  if (data.message_count !== undefined) details.push(`messages: ${data.message_count}`);
   if (data.max_steps !== undefined) details.push(`steps: ${data.max_steps}`);
   if (data.ok !== undefined) details.push(data.ok ? "ok" : "failed");
   if (data.result?.exit_code !== undefined) details.push(`exit: ${data.result.exit_code}`);
@@ -260,6 +312,7 @@ function timelineDetails(event) {
   return details.slice(0, 4);
 }
 
+// Make JSON safe for short timeline chips.
 function compactJson(value, limit = 120) {
   try {
     return clampInline(JSON.stringify(value), limit);
@@ -268,18 +321,21 @@ function compactJson(value, limit = 120) {
   }
 }
 
+// Collapse whitespace and truncate text that needs to fit on one row.
 function clampInline(value, limit = 120) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   if (text.length <= limit) return text;
   return `${text.slice(0, Math.max(0, limit - 1))}...`;
 }
 
+// Format event timestamps for compact timeline display.
 function formatEventTime(timestamp) {
   const date = timestamp ? new Date(timestamp) : null;
   if (!date || Number.isNaN(date.getTime())) return "";
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+// Open the full event modal for a timeline item.
 function openTimelineDetail(event) {
   state.selectedTimelineEvent = event;
   const type = event.type || "event";
@@ -297,12 +353,15 @@ function openTimelineDetail(event) {
   $("timelineDetailCloseBtn").focus();
 }
 
+// Close the full event modal and forget the selected event.
 function closeTimelineDetail() {
   state.selectedTimelineEvent = null;
   $("timelineDetailModal").classList.remove("open");
   $("timelineDetailModal").setAttribute("aria-hidden", "true");
 }
 
+// Build one section inside the timeline detail modal. Code sections are escaped
+// and wrapped in <pre> for readable JSON.
 function timelineDetailSection(title, value, code = false) {
   return `
     <section class="timeline-detail-section">
@@ -312,6 +371,8 @@ function timelineDetailSection(title, value, code = false) {
   `;
 }
 
+// Fetch the session list from the server and keep the currently selected
+// session if possible.
 async function refreshSessions() {
   const data = await api("/api/sessions");
   state.sessions = data.sessions || [];
@@ -328,6 +389,8 @@ async function refreshSessions() {
   }
 }
 
+// Fetch the active session. This is used after sending messages and by the
+// polling loop to keep chat/status/timeline fresh.
 async function pollSession() {
   if (!state.sessionId) return;
   const session = await api(`/api/sessions/${state.sessionId}`);
@@ -339,6 +402,7 @@ async function pollSession() {
   if (state.logsOpen && state.logView === "trace") await refreshLogs();
 }
 
+// Create a fresh server-side session and switch the UI to it immediately.
 async function createSession() {
   const session = await api("/api/sessions", { method: "POST", body: "{}" });
   state.sessionId = session.id;
@@ -350,6 +414,8 @@ async function createSession() {
   if (state.logsOpen && state.logView === "trace") await refreshLogs();
 }
 
+// Delete one dashboard session after confirmation. If it was selected, choose
+// the newest remaining session or clear the main view.
 async function deleteSession(session) {
   const title = session.title || "this session";
   if (!window.confirm(`Delete "${title}"? This only removes it from the dashboard history.`)) return;
@@ -375,6 +441,8 @@ async function deleteSession(session) {
   if (state.logsOpen) await refreshLogs();
 }
 
+// Submit a user message plus any uploaded images to the backend. Preferences are
+// saved first so the turn uses the current model/tool/theme settings.
 async function sendMessage(event) {
   event.preventDefault();
   await savePreferencesNow();
@@ -400,6 +468,12 @@ async function sendMessage(event) {
   await pollSession();
 }
 
+// ============================================================================
+// LM Studio Status and Workspace State
+// ============================================================================
+
+// Ask the backend whether LM Studio is reachable for the selected endpoint/model
+// and update the status pill.
 async function checkStatus() {
   const endpoint = encodeURIComponent($("endpointInput").value.trim());
   const model = encodeURIComponent($("modelInput").value.trim());
@@ -415,6 +489,7 @@ async function checkStatus() {
   }
 }
 
+// Build the short top-right LM Studio status text.
 function statusText(data) {
   const context = data.selected_model_context || {};
   const tokens = Number(context.context_window || 0);
@@ -423,6 +498,8 @@ function statusText(data) {
   return `LM Studio online · ctx ${tokens.toLocaleString()}${suffix}`;
 }
 
+// If the backend can see the selected model's context window, copy it into the
+// settings form so the summarizer threshold matches the model.
 function applyModelContextFromStatus(data) {
   if (!data.ok || !data.selected_model_context) return;
   const context = Number(data.selected_model_context.context_window || 0);
@@ -436,12 +513,14 @@ function applyModelContextFromStatus(data) {
   }
 }
 
+// Load Docker workspace health/configuration shown in the left sidebar.
 async function loadWorkspace() {
   const data = await api("/api/workspace");
   state.workspace = data;
   renderWorkspace(data);
 }
 
+// Paint the workspace panel from the server's workspace status response.
 function renderWorkspace(workspace) {
   $("workspacePath").textContent = workspace.workspace || "docker://Thursday/workspace";
   $("workspaceContainer").textContent = workspace.container || "Thursday";
@@ -452,6 +531,105 @@ function renderWorkspace(workspace) {
   setMaintenanceButtons();
 }
 
+// Load the user-controlled GUI region used by the gui_for_llm tool. This tells
+// the model where it is allowed to look/click without making the model choose a
+// monitor region itself.
+async function loadGuiForLlm() {
+  try {
+    const data = await api("/api/gui-for-llm");
+    state.guiForLlm.displays = data.displays || [];
+    state.guiForLlm.activeRegion = data.active_region || null;
+    renderGuiForLlmControls();
+  } catch (error) {
+    $("guiRegionStatus").textContent = "unavailable";
+    console.warn(error);
+  }
+}
+
+// Render display options and region fields. If no active region exists yet, the
+// first display is used as a sensible default.
+function renderGuiForLlmControls() {
+  const displays = state.guiForLlm.displays || [];
+  const select = $("guiDisplaySelect");
+  select.innerHTML = "";
+  displays.forEach((display) => {
+    const option = document.createElement("option");
+    option.value = String(display.id);
+    option.textContent = `${display.primary ? "Primary" : "Display"} ${display.id} · ${display.width}×${display.height}`;
+    select.appendChild(option);
+  });
+
+  const fallback = displays[0] ? {
+    display: displays[0].id,
+    x: 0,
+    y: 0,
+    width: displays[0].width,
+    height: displays[0].height,
+  } : null;
+  const region = state.guiForLlm.activeRegion || fallback;
+  if (!region) {
+    $("guiRegionStatus").textContent = "no screen";
+    return;
+  }
+
+  select.value = String(region.display || 0);
+  $("guiRegionX").value = String(region.x || 0);
+  $("guiRegionY").value = String(region.y || 0);
+  $("guiRegionWidth").value = String(region.width || 800);
+  $("guiRegionHeight").value = String(region.height || 600);
+  $("guiRegionStatus").textContent = state.guiForLlm.activeRegion ? "ready" : "not set";
+}
+
+// Read the region form and clamp it to the selected display dimensions.
+function guiRegionFromUi() {
+  const displayId = Number($("guiDisplaySelect").value || 0);
+  const display = (state.guiForLlm.displays || []).find((item) => Number(item.id) === displayId);
+  const maxWidth = Number(display?.width || 800);
+  const maxHeight = Number(display?.height || 600);
+  const x = clampNumber(Number($("guiRegionX").value || 0), 0, Math.max(0, maxWidth - 20));
+  const y = clampNumber(Number($("guiRegionY").value || 0), 0, Math.max(0, maxHeight - 20));
+  const width = clampNumber(Number($("guiRegionWidth").value || maxWidth), 20, Math.max(20, maxWidth - x));
+  const height = clampNumber(Number($("guiRegionHeight").value || maxHeight), 20, Math.max(20, maxHeight - y));
+  return { display: displayId, x, y, width, height };
+}
+
+// Save the selected GUI region on the backend. The gui_for_llm tool will use
+// this active region by default for screenshots and input actions.
+async function saveGuiRegion() {
+  const region = guiRegionFromUi();
+  $("guiRegionStatus").textContent = "saving";
+  const result = await api("/api/gui-for-llm/region", { method: "POST", body: JSON.stringify(region) });
+  state.guiForLlm.activeRegion = result.output?.active_region || region;
+  $("guiRegionStatus").textContent = result.ok ? "ready" : "failed";
+  renderGuiForLlmControls();
+}
+
+// Capture a screenshot of the saved GUI region and show a small preview. This
+// is only a dashboard preview; the model gets screenshots through tool results.
+async function previewGuiRegion() {
+  $("guiRegionStatus").textContent = "capturing";
+  const result = await api("/api/gui-for-llm/screenshot", { method: "POST", body: "{}" });
+  const image = result.output?.llm_images?.[0];
+  const preview = $("guiRegionPreview");
+  if (image?.path) {
+    preview.src = imageUrlForPath(image.path);
+    preview.hidden = false;
+    state.guiForLlm.previewPath = image.path;
+  }
+  $("guiRegionStatus").textContent = result.ok ? "previewed" : "failed";
+}
+
+function imageUrlForPath(path) {
+  return `/api/images?path=${encodeURIComponent(path)}`;
+}
+
+function clampNumber(value, minimum, maximum) {
+  if (!Number.isFinite(value)) return minimum;
+  return Math.max(minimum, Math.min(Math.round(value), maximum));
+}
+
+// Recreate the Docker workspace container after confirmation. This does not
+// delete host files or dashboard sessions.
 async function resetWorkspace() {
   if (state.maintenanceBusy || state.workspaceResetting) return;
   const container = state.workspace?.container || "Thursday";
@@ -482,6 +660,8 @@ async function resetWorkspace() {
   }
 }
 
+// Remove all dashboard sessions after confirmation, then reset the visible chat,
+// metrics, files, and timeline panels.
 async function clearAllSessions() {
   if (state.maintenanceBusy) return;
   const confirmed = window.confirm(
@@ -510,6 +690,8 @@ async function clearAllSessions() {
   }
 }
 
+// Reset the center/right session-dependent panels when there is no active
+// session to render.
 function clearSessionViews() {
   const chat = $("chatLog");
   chat.innerHTML = "";
@@ -525,6 +707,8 @@ function clearSessionViews() {
   renderTimeline({ events: [] });
 }
 
+// Clear logs without touching sessions, preferences, reminders, or workspace
+// files.
 async function clearAllLogs() {
   if (state.maintenanceBusy) return;
   const confirmed = window.confirm(
@@ -546,6 +730,8 @@ async function clearAllLogs() {
   }
 }
 
+// Disable maintenance buttons while a destructive/long-running maintenance
+// action is active.
 function setMaintenanceButtons() {
   ["clearSessionsBtn", "clearLogsBtn", "resetWorkspaceBtn"].forEach((id) => {
     const button = $(id);
@@ -553,10 +739,16 @@ function setMaintenanceButtons() {
   });
 }
 
+// Short status text beside the Maintenance heading.
 function setMaintenanceStatus(message) {
   $("maintenanceStatus").textContent = message || "ready";
 }
 
+// ============================================================================
+// Tool List and Preferences
+// ============================================================================
+
+// Load all tool definitions and enabled/required state from the backend.
 async function loadTools() {
   const data = await api("/api/tools");
   $("workspacePath").textContent = data.workspace;
@@ -567,6 +759,8 @@ async function loadTools() {
   renderToolControls();
 }
 
+// Render the left sidebar tool toggles. Required tools are shown checked and
+// disabled because the system needs them to function.
 function renderToolControls() {
   const list = $("toolList");
   list.innerHTML = "";
@@ -599,16 +793,19 @@ function renderToolControls() {
   });
 }
 
+// Load immutable/default app config from the backend.
 async function loadConfig() {
   const config = await api("/api/config");
   state.config = config;
 }
 
+// Load saved user preferences, then apply them to the settings UI.
 async function loadPreferences() {
   const preferences = await api("/api/preferences");
   applyPreferences(preferences);
 }
 
+// Copy backend preferences into UI controls and local state.
 function applyPreferences(preferences) {
   state.preferences = preferences;
   const settings = preferences.settings || state.config.default_settings;
@@ -629,6 +826,7 @@ function applyPreferences(preferences) {
   if (state.allTools.length) renderToolControls();
 }
 
+// Required tools must stay enabled even if the user changes tool selections.
 function ensureRequiredToolsEnabled() {
   const known = new Set(state.allTools.map(toolName));
   const enabled = new Set(state.enabledTools);
@@ -638,6 +836,12 @@ function ensureRequiredToolsEnabled() {
   state.enabledTools = Array.from(enabled).filter((name) => !known.size || known.has(name));
 }
 
+// ============================================================================
+// Event Binding and Resizable Panels
+// ============================================================================
+
+// Attach every DOM event listener used by the dashboard. If a button/control
+// needs new behavior, this is the first place to look.
 function bindUi() {
   $("chatForm").addEventListener("submit", sendMessage);
   $("attachImageBtn").addEventListener("click", () => $("imageInput").click());
@@ -651,6 +855,28 @@ function bindUi() {
   $("clearSessionsBtn").addEventListener("click", clearAllSessions);
   $("clearLogsBtn").addEventListener("click", clearAllLogs);
   $("resetWorkspaceBtn").addEventListener("click", resetWorkspace);
+  $("guiDisplaySelect").addEventListener("change", () => {
+    const displayId = Number($("guiDisplaySelect").value || 0);
+    const display = (state.guiForLlm.displays || []).find((item) => Number(item.id) === displayId);
+    if (!display) return;
+    $("guiRegionX").value = "0";
+    $("guiRegionY").value = "0";
+    $("guiRegionWidth").value = String(display.width);
+    $("guiRegionHeight").value = String(display.height);
+    $("guiRegionStatus").textContent = "edited";
+  });
+  ["guiRegionX", "guiRegionY", "guiRegionWidth", "guiRegionHeight"].forEach((id) => {
+    $(id).addEventListener("change", () => {
+      const region = guiRegionFromUi();
+      $("guiRegionX").value = String(region.x);
+      $("guiRegionY").value = String(region.y);
+      $("guiRegionWidth").value = String(region.width);
+      $("guiRegionHeight").value = String(region.height);
+      $("guiRegionStatus").textContent = "edited";
+    });
+  });
+  $("saveGuiRegionBtn").addEventListener("click", saveGuiRegion);
+  $("previewGuiRegionBtn").addEventListener("click", previewGuiRegion);
   $("temperatureInput").addEventListener("input", () => {
     $("temperatureValue").textContent = $("temperatureInput").value;
     schedulePreferencesSave();
@@ -703,6 +929,7 @@ function bindUi() {
   });
 }
 
+// Restore saved sidebar/drawer widths from localStorage.
 function loadPanelWidths() {
   let saved = {};
   try {
@@ -716,6 +943,7 @@ function loadPanelWidths() {
   });
 }
 
+// Persist one resized panel width to localStorage.
 function savePanelWidth(key, value) {
   let saved = {};
   try {
@@ -727,6 +955,7 @@ function savePanelWidth(key, value) {
   localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, JSON.stringify(saved));
 }
 
+// Apply one width to the matching CSS variable and optionally persist it.
 function setPanelWidth(key, value, persist = true) {
   const cssVar = PANEL_WIDTH_VARS[key];
   if (!cssVar) return;
@@ -735,6 +964,7 @@ function setPanelWidth(key, value, persist = true) {
   if (persist) savePanelWidth(key, clamped);
 }
 
+// Keep resizable panels usable by clamping them to the current viewport.
 function clampPanelWidth(key, value) {
   const viewport = Math.max(320, window.innerWidth || 1200);
   const handleSpace = viewport > 1050 ? 12 : 6;
@@ -750,6 +980,8 @@ function clampPanelWidth(key, value) {
   return Math.min(limits[1], Math.max(limits[0], Number(value) || PANEL_WIDTH_DEFAULTS[key] || limits[0]));
 }
 
+// Wire all resize handles. Sidebars resize from their nearest edge; drawers
+// resize from the right side of the viewport.
 function bindResizablePanels() {
   bindResizeHandle("leftResizeHandle", "left", (clientX) => {
     const layout = document.querySelector(".layout");
@@ -762,6 +994,7 @@ function bindResizablePanels() {
   bindResizeHandle("settingsDrawerResizeHandle", "settings", (clientX) => window.innerWidth - clientX, -1);
 }
 
+// Add pointer and keyboard resizing behavior to one handle.
 function bindResizeHandle(handleId, key, valueFromPointer, keyboardDirection) {
   const handle = $(handleId);
   if (!handle) return;
@@ -796,12 +1029,19 @@ function bindResizeHandle(handleId, key, valueFromPointer, keyboardDirection) {
   });
 }
 
+// Read the current pixel width from the CSS variable for a panel/drawer.
 function currentPanelWidth(key) {
   const value = getComputedStyle(document.documentElement).getPropertyValue(PANEL_WIDTH_VARS[key]);
   const parsed = Number(String(value).replace("px", "").trim());
   return Number.isFinite(parsed) ? parsed : PANEL_WIDTH_DEFAULTS[key];
 }
 
+// ============================================================================
+// Theme and Color Utilities
+// ============================================================================
+
+// Apply a selected accent color by updating CSS custom properties. The CSS file
+// uses these variables for borders, glows, buttons, and status accents.
 function applyTheme(value) {
   const color = normalizeHexColor(value);
   const rgb = hexToRgb(color);
@@ -819,12 +1059,14 @@ function applyTheme(value) {
   $("themeColorTextInput").value = color;
 }
 
+// Accept only full 6-digit hex colors. Invalid input falls back to default.
 function normalizeHexColor(value) {
   const text = String(value || DEFAULT_THEME_COLOR).trim();
   if (/^#[0-9a-fA-F]{6}$/.test(text)) return text.toLowerCase();
   return DEFAULT_THEME_COLOR;
 }
 
+// Convert #rrggbb into numeric RGB components.
 function hexToRgb(hex) {
   const value = normalizeHexColor(hex).slice(1);
   return {
@@ -834,6 +1076,8 @@ function hexToRgb(hex) {
   };
 }
 
+// Blend two RGB colors. Used to produce lighter/muted/deeper variants of the
+// selected accent color.
 function mixRgb(first, second, amount) {
   const ratio = Math.max(0, Math.min(1, Number(amount) || 0));
   return {
@@ -843,10 +1087,17 @@ function mixRgb(first, second, amount) {
   };
 }
 
+// Convert numeric RGB components back into #rrggbb.
 function rgbToHex(rgb) {
   return `#${[rgb.r, rgb.g, rgb.b].map((part) => Math.max(0, Math.min(255, part)).toString(16).padStart(2, "0")).join("")}`;
 }
 
+// ============================================================================
+// Image Attachments
+// ============================================================================
+
+// Read selected image files, upload them to the backend, and keep temporary
+// object URLs for local preview chips.
 async function handleImageSelection(event) {
   const files = Array.from(event.target.files || []).filter((file) => file.type.startsWith("image/"));
   if (!files.length) return;
@@ -858,6 +1109,8 @@ async function handleImageSelection(event) {
   renderImagePreview();
 }
 
+// Upload one image file. The backend stores the file and returns a path/URL that
+// can later be passed to the model request.
 async function uploadImageFile(file) {
   const formData = new FormData();
   formData.append("image", file, file.name);
@@ -879,6 +1132,7 @@ async function uploadImageFile(file) {
   }
 }
 
+// Render removable preview chips above the composer for pending image uploads.
 function renderImagePreview() {
   const preview = $("imagePreview");
   preview.innerHTML = "";
@@ -900,6 +1154,7 @@ function renderImagePreview() {
   });
 }
 
+// Render images that are already part of a chat message.
 function renderMessageImages(images) {
   if (!images.length) return null;
   const gallery = document.createElement("div");
@@ -915,11 +1170,18 @@ function renderMessageImages(images) {
   return gallery;
 }
 
+// ============================================================================
+// Saving Preferences and Drawers
+// ============================================================================
+
+// Debounce preference saves so sliders/text inputs do not send a request on
+// every tiny intermediate edit.
 function schedulePreferencesSave() {
   clearTimeout(state.saveTimer);
   state.saveTimer = setTimeout(savePreferencesNow, 350);
 }
 
+// Persist settings/theme/tool preferences to the backend immediately.
 async function savePreferencesNow() {
   clearTimeout(state.saveTimer);
   const preferences = await api("/api/preferences", {
@@ -934,6 +1196,7 @@ async function savePreferencesNow() {
   setSettingsSaveStatus("Saved");
 }
 
+// Explicit Save button handler with user-facing save status.
 async function saveSettingsClicked() {
   setSettingsSaveStatus("Saving...");
   try {
@@ -945,6 +1208,7 @@ async function saveSettingsClicked() {
   }
 }
 
+// Brief status message inside the settings drawer.
 function setSettingsSaveStatus(message) {
   const status = $("settingsSaveStatus");
   if (!status) return;
@@ -957,6 +1221,7 @@ function setSettingsSaveStatus(message) {
   }
 }
 
+// Restore backend default preferences and refresh model status.
 async function restoreDefaults() {
   const preferences = await api("/api/preferences", {
     method: "POST",
@@ -966,6 +1231,7 @@ async function restoreDefaults() {
   await checkStatus();
 }
 
+// Open or close the Logs drawer.
 async function toggleLogsDrawer() {
   if (state.logsOpen) {
     closeLogsDrawer();
@@ -974,6 +1240,7 @@ async function toggleLogsDrawer() {
   await openLogsDrawer();
 }
 
+// Open Logs and close Settings so only one drawer overlays the dashboard.
 async function openLogsDrawer() {
   closeSettingsDrawer();
   state.logsOpen = true;
@@ -984,6 +1251,7 @@ async function openLogsDrawer() {
   await refreshLogs();
 }
 
+// Close the Logs drawer without changing the selected log view.
 function closeLogsDrawer() {
   state.logsOpen = false;
   document.body.classList.remove("logs-open");
@@ -991,6 +1259,7 @@ function closeLogsDrawer() {
   $("logsTab").setAttribute("aria-expanded", "false");
 }
 
+// Open or close the Settings drawer.
 function toggleSettingsDrawer() {
   if (state.settingsOpen) {
     closeSettingsDrawer();
@@ -999,6 +1268,7 @@ function toggleSettingsDrawer() {
   openSettingsDrawer();
 }
 
+// Open Settings and close Logs so the drawers do not stack.
 function openSettingsDrawer() {
   closeLogsDrawer();
   state.settingsOpen = true;
@@ -1007,6 +1277,7 @@ function openSettingsDrawer() {
   $("settingsTab").setAttribute("aria-expanded", "true");
 }
 
+// Close the Settings drawer.
 function closeSettingsDrawer() {
   state.settingsOpen = false;
   document.body.classList.remove("settings-open");
@@ -1014,12 +1285,15 @@ function closeSettingsDrawer() {
   $("settingsTab").setAttribute("aria-expanded", "false");
 }
 
+// Highlight the active log tab.
 function renderLogTabs() {
   document.querySelectorAll("[data-log-view]").forEach((button) => {
     button.classList.toggle("active", button.dataset.logView === state.logView);
   });
 }
 
+// Fetch and render whichever log view is selected. The in-flight guard prevents
+// overlapping poll responses from racing each other.
 async function refreshLogs() {
   if (state.logsPollInFlight) return;
   state.logsPollInFlight = true;
@@ -1039,6 +1313,7 @@ async function refreshLogs() {
   }
 }
 
+// Render app/http database logs as simple rows.
 function renderDatabaseLogs(payload, source) {
   $("logsMeta").textContent = `${payload.logs?.length || 0} ${source.toUpperCase()} rows · ${payload.file || ""}`;
   const list = $("logsList");
@@ -1066,6 +1341,8 @@ function renderDatabaseLogs(payload, source) {
   });
 }
 
+// Render raw LM Studio request/response records. Open detail panels stay open
+// across refreshes by storing their keys in state.rawOpenPanels.
 function renderRawLog(rawLog) {
   $("logsMeta").textContent = `${rawLog.entries?.length || 0}/${rawLog.line_count || 0} raw LM Studio rows · ${rawLog.table || "sqlite"} · ${rawLog.file || ""}`;
   const list = $("logsList");
@@ -1085,6 +1362,7 @@ function renderRawLog(rawLog) {
   list.scrollTop = previousScrollTop;
 }
 
+// Build one expandable raw LM Studio record.
 function renderRawLogItem(entry) {
   const item = document.createElement("details");
   const status = entry.response?.status_code || (entry.error ? "error" : "pending");
@@ -1107,6 +1385,7 @@ function renderRawLogItem(entry) {
   return item;
 }
 
+// Compose the short summary shown in a raw log record header.
 function rawRecordLabel(entry, status) {
   const request = entry.request?.json || {};
   const response = entry.response || {};
@@ -1123,6 +1402,8 @@ function rawRecordLabel(entry, status) {
   ].filter(Boolean).join(" · ");
 }
 
+// Render the two main blocks inside a raw record: request to LM Studio and
+// response/error from LM Studio.
 function renderRawInputOutput(entry) {
   return `
     <section class="raw-io-block">
@@ -1136,16 +1417,19 @@ function renderRawInputOutput(entry) {
   `;
 }
 
+// Stable key used to remember whether a raw log panel is open.
 function rawPanelKey(entry) {
   return String(entry.id || entry.request_id || entry._line || "record");
 }
 
+// Format raw record timestamps while tolerating missing/invalid data.
 function formatRawTimestamp(timestamp) {
   const date = timestamp ? new Date(timestamp) : null;
   if (!date || Number.isNaN(date.getTime())) return "unknown time";
   return date.toLocaleString();
 }
 
+// Convert the stored raw request object into readable text.
 function formatRawInput(entry) {
   const request = entry.request?.json || {};
   const lines = [
@@ -1160,6 +1444,7 @@ function formatRawInput(entry) {
   return lines.join("\n");
 }
 
+// Convert the stored raw response/error object into readable text.
 function formatRawOutput(entry) {
   if (entry.error) {
     return [
@@ -1185,6 +1470,8 @@ function formatRawOutput(entry) {
   return lines.join("\n");
 }
 
+// Turn the JSON request body into a human-readable outline, especially messages
+// and tool definitions.
 function formatReadableRequestBody(request) {
   const body = [];
   const { messages = [], tools = [], ...settings } = request || {};
@@ -1212,6 +1499,8 @@ function formatReadableRequestBody(request) {
   return body.join("\n");
 }
 
+// Turn raw response body data into readable text, parsing JSON strings when
+// possible.
 function formatReadableResponseBody(response) {
   if (response.text) return formatReadableJsonText(response.text);
   if (response.json !== undefined && response.json !== null) return formatReadableValue(response.json);
@@ -1219,6 +1508,7 @@ function formatReadableResponseBody(response) {
   return "(empty response body)";
 }
 
+// Pretty-print JSON stored as text; fall back to the raw text if parsing fails.
 function formatReadableJsonText(text) {
   try {
     return formatReadableValue(JSON.parse(text));
@@ -1227,6 +1517,7 @@ function formatReadableJsonText(text) {
   }
 }
 
+// Recursive object/array/string formatter used by the raw log viewer.
 function formatReadableValue(value, indent = 0) {
   const pad = " ".repeat(indent);
   if (value === undefined) return "";
@@ -1254,34 +1545,46 @@ function formatReadableValue(value, indent = 0) {
   }).join("\n");
 }
 
+// Indent every line in a preformatted block.
 function indentBlock(value, spaces = 2) {
   const prefix = " ".repeat(spaces);
   return String(value || "").split("\n").map((line) => `${prefix}${line}`).join("\n");
 }
 
+// Escape raw text before inserting it into a <pre>.
 function rawPre(value) {
   return `<pre class="raw-pre">${escapeHtml(value)}</pre>`;
 }
 
+// Standard pretty JSON helper.
 function prettyJson(value) {
   return JSON.stringify(value, null, 2);
 }
 
+// Convert message content objects/arrays into displayable text.
 function stringifyContent(value) {
   if (value === undefined || value === null) return "";
   if (typeof value === "string") return value;
   return prettyJson(value);
 }
 
+// ============================================================================
+// Trace Log View
+// ============================================================================
+
+// Render the active session's LLM transcript/summary in the Logs drawer.
 function renderTrace(trace) {
   $("logsMeta").textContent = `${trace.message_count || 0} messages · ${trace.status} · ${trace.token_estimate || 0}/${trace.context_window || 0} tokens est.`;
   const list = $("logsList");
   if (hasSelectionInside(list)) return;
   list.innerHTML = "";
+  if (trace.summary) {
+    list.appendChild(renderTraceSummary(trace));
+  }
   if (!trace.messages || !trace.messages.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = "No LLM messages yet.";
+    empty.textContent = trace.summary ? "No active LLM messages beyond the summary yet." : "No LLM messages yet.";
     list.appendChild(empty);
     return;
   }
@@ -1290,6 +1593,7 @@ function renderTrace(trace) {
   });
 }
 
+// Render one message inside the trace transcript.
 function renderTraceItem(message, index) {
   const item = document.createElement("article");
   item.className = `trace-item ${escapeClass(message.role || "unknown")}`;
@@ -1303,6 +1607,18 @@ function renderTraceItem(message, index) {
   return item;
 }
 
+// Render the active context summary banner that appears after summarization.
+function renderTraceSummary(trace) {
+  const item = document.createElement("article");
+  item.className = "trace-item context-summary";
+  item.innerHTML = `
+    <div class="trace-role">Active context summary · ${Number(trace.summary_chars || 0).toLocaleString()} chars</div>
+    <div class="trace-content">${traceSection("summary", trace.summary)}</div>
+  `;
+  return item;
+}
+
+// Split a trace message into content/thinking/tool_calls/usage sections.
 function renderTraceSections(message) {
   const sections = [];
   const content = message.content;
@@ -1315,6 +1631,7 @@ function renderTraceSections(message) {
   return sections.join("");
 }
 
+// Build one labeled trace section.
 function traceSection(label, value, variant = "") {
   return `
     <section class="trace-section ${escapeClass(variant || label)}">
@@ -1324,6 +1641,7 @@ function traceSection(label, value, variant = "") {
   `;
 }
 
+// Clear run metrics, files, and timeline when there is no session selected.
 function resetSessionMetrics() {
   $("runStatus").textContent = "idle";
   $("tokenMetric").textContent = "0";
@@ -1335,6 +1653,8 @@ function resetSessionMetrics() {
   $("timelineCount").textContent = "0 events";
 }
 
+// Build a lightweight signature for visible messages. If this does not change,
+// renderSession can avoid rewriting the chat DOM.
 function getMessageSignature(session) {
   return JSON.stringify((session.visible_messages || []).map((message) => [
     message.role,
@@ -1344,6 +1664,7 @@ function getMessageSignature(session) {
   ]));
 }
 
+// Keep polling refreshes from replacing DOM while the user is selecting text.
 function hasSelectionInside(element) {
   const selection = window.getSelection();
   if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false;
@@ -1351,10 +1672,16 @@ function hasSelectionInside(element) {
   return element.contains(range.commonAncestorContainer);
 }
 
+// Extract the OpenAI-style tool name from a tool definition.
 function toolName(tool) {
   return tool?.function?.name || "";
 }
 
+// ============================================================================
+// Escaping and Markdown Rendering
+// ============================================================================
+
+// Escape text before inserting it as HTML.
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -1364,14 +1691,18 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+// Escape text for use inside HTML attributes.
 function escapeAttribute(value) {
   return escapeHtml(value).replaceAll("`", "&#096;");
 }
 
+// Make arbitrary event/tool names safe to use as CSS class fragments.
 function escapeClass(value) {
   return String(value).toLowerCase().replace(/[^a-z0-9_-]/g, "-");
 }
 
+// Minimal markdown renderer for assistant/user messages. It supports fenced
+// code blocks, headings, lists, links, bold, italic, and inline code.
 function renderMarkdown(value) {
   const text = String(value || "").replace(/\r\n/g, "\n");
   const parts = [];
@@ -1390,6 +1721,7 @@ function renderMarkdown(value) {
   return parts.join("");
 }
 
+// Render markdown block-level structures outside fenced code blocks.
 function renderMarkdownBlocks(text) {
   const lines = text.split("\n");
   const blocks = [];
@@ -1447,6 +1779,7 @@ function renderMarkdownBlocks(text) {
   return blocks.join("");
 }
 
+// Render inline markdown after protecting inline code spans.
 function renderInlineMarkdown(value) {
   const codeSpans = [];
   let text = String(value).replace(/`([^`]+)`/g, (_, code) => {
@@ -1466,12 +1799,21 @@ function renderInlineMarkdown(value) {
   return text;
 }
 
+// ============================================================================
+// Application Boot
+// ============================================================================
+
+// Initialize the dashboard in dependency order:
+// 1. restore local widths and bind DOM events
+// 2. load backend config/preferences
+// 3. load tools/workspace/sessions/status in parallel
+// 4. start a polling loop for live updates
 async function init() {
   loadPanelWidths();
   bindUi();
   await loadConfig();
   await loadPreferences();
-  await Promise.all([loadTools(), loadWorkspace(), refreshSessions(), checkStatus()]);
+  await Promise.all([loadTools(), loadWorkspace(), loadGuiForLlm(), refreshSessions(), checkStatus()]);
   const requestedLogView = new URLSearchParams(window.location.search).get("logs");
   if (["trace", "raw", "http", "app"].includes(requestedLogView)) {
     state.logView = requestedLogView;
@@ -1487,6 +1829,8 @@ async function init() {
   }, 1500);
 }
 
+// Surface boot errors in the chat area so failures are visible without opening
+// devtools.
 init().catch((error) => {
   console.error(error);
   $("chatLog").textContent = error.message;

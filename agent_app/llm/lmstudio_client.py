@@ -1,21 +1,34 @@
 from __future__ import annotations
 
 import json
-import base64
 import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 import httpx
 from openai import APIStatusError, OpenAI
 
-from ..config import AppConfig
-from ..models import AgentSettings
-from ..logging_store import insert_raw_lmstudio_log
+from ..runtime.config import AppConfig
+from ..runtime.models import AgentSettings
+from ..logging import insert_raw_lmstudio_log
 from ..utils import estimate_tokens
+from .message_transport import (
+    message_content_to_text,
+    messages_for_transport as build_messages_for_transport,
+    responses_input_items,
+    sanitize_messages,
+)
+from .response_parsing import (
+    model_to_json,
+    payload_for_log,
+    raw_response_headers,
+    raw_response_status,
+    response_to_chat_completion,
+    responses_finish_reason,
+    responses_tools,
+)
 
 
 class LMStudioChatClient:
@@ -36,7 +49,7 @@ class LMStudioChatClient:
     ) -> dict[str, Any]:
         endpoint = settings.endpoint.rstrip("/")
         request_id = uuid.uuid4().hex
-        messages_for_transport = self._messages_for_transport(self._sanitize_messages(messages))
+        messages_for_transport = build_messages_for_transport(sanitize_messages(messages), self.config)
         prompt_estimate = estimate_tokens(json.dumps(messages_for_transport, ensure_ascii=False))
         if self.config.use_responses_api:
             try:
@@ -51,6 +64,8 @@ class LMStudioChatClient:
                     response_anchor_message_count=response_anchor_message_count,
                 )
             except Exception as exc:
+                if self._is_model_unavailable_exception(exc):
+                    raise
                 self._write_raw_log({
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "request_id": request_id,
@@ -128,7 +143,7 @@ class LMStudioChatClient:
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": settings.model,
-            "input": self.responses_input_items(messages),
+            "input": responses_input_items(messages),
             "temperature": settings.temperature,
             "top_p": settings.top_p,
             "max_output_tokens": self.max_tokens_for_context(settings, prompt_estimate),
@@ -138,57 +153,13 @@ class LMStudioChatClient:
         }
         if previous_response_id:
             payload["previous_response_id"] = previous_response_id
-        converted_tools = self.responses_tools(tools)
+        converted_tools = responses_tools(tools)
         if converted_tools:
             payload["tools"] = converted_tools
             payload["tool_choice"] = "auto"
         return payload
 
-    def responses_tools(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        converted: list[dict[str, Any]] = []
-        for tool in tools or []:
-            function = tool.get("function") if isinstance(tool.get("function"), dict) else {}
-            name = function.get("name")
-            if not name:
-                continue
-            converted.append({
-                "type": "function",
-                "name": name,
-                "description": str(function.get("description") or ""),
-                "parameters": function.get("parameters") if isinstance(function.get("parameters"), dict) else {"type": "object", "properties": {}},
-            })
-        return converted
 
-    def responses_input_items(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        items: list[dict[str, Any]] = []
-        for message in messages:
-            role = message.get("role")
-            content = message.get("content")
-            if role == "tool":
-                items.append({
-                    "type": "function_call_output",
-                    "call_id": str(message.get("tool_call_id") or message.get("id") or ""),
-                    "output": self.message_content_to_text(content),
-                })
-                continue
-
-            if role in {"system", "user", "assistant"}:
-                text = self.message_content_to_text(content)
-                if text:
-                    items.append({"role": role, "content": text})
-                if role == "assistant":
-                    for call in message.get("tool_calls") or []:
-                        function = call.get("function", {}) if isinstance(call.get("function"), dict) else {}
-                        name = function.get("name") or call.get("name")
-                        if not name:
-                            continue
-                        items.append({
-                            "type": "function_call",
-                            "call_id": str(call.get("id") or call.get("call_id") or f"call_{uuid.uuid4().hex[:10]}"),
-                            "name": str(name),
-                            "arguments": self.message_content_to_text(function.get("arguments") or call.get("arguments") or "{}"),
-                        })
-        return items
 
     def _create_response(
         self,
@@ -198,138 +169,78 @@ class LMStudioChatClient:
         attempt: int,
         fallback_from_previous: bool,
     ) -> dict[str, Any]:
-        started = time.perf_counter()
-        timestamp = datetime.now(timezone.utc).isoformat()
         url = f"{endpoint}/v1/responses"
-        try:
-            with httpx.Client(timeout=self.config.llm_timeout_seconds) as client:
-                response = client.post(url, json=payload)
-                response.raise_for_status()
-                response_json = response.json()
-            self._write_raw_log({
-                "timestamp": timestamp,
-                "request_id": request_id,
-                "kind": "lmstudio.openai.responses",
-                "attempt": attempt,
-                "compatibility_mode": False,
-                "fallback_from_previous_response_id": fallback_from_previous,
-                "method": "POST",
-                "url": url,
-                "request": {"headers": {"Content-Type": "application/json"}, "json": self.payload_for_log(payload)},
-                "response": {
-                    "status_code": response.status_code,
-                    "headers": dict(response.headers),
-                    "text": json.dumps(response_json, ensure_ascii=False),
-                    "json": response_json,
-                    "json_error": "",
-                },
-                "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
-            })
-            return self.response_to_chat_completion(response_json, payload, fallback_from_previous)
-        except Exception as exc:
-            response = getattr(exc, "response", None)
-            response_text = getattr(response, "text", "") if response is not None else ""
-            response_json: Any = None
-            response_json_error = ""
-            if response is not None:
-                try:
+        max_transport_attempts = 3
+        for transport_attempt in range(1, max_transport_attempts + 1):
+            started = time.perf_counter()
+            timestamp = datetime.now(timezone.utc).isoformat()
+            try:
+                with httpx.Client(timeout=self.config.llm_timeout_seconds) as client:
+                    response = client.post(url, json=payload)
+                    response.raise_for_status()
                     response_json = response.json()
-                except Exception as json_exc:
-                    response_json_error = str(json_exc)
-            self._write_raw_log({
-                "timestamp": timestamp,
-                "request_id": request_id,
-                "kind": "lmstudio.openai.responses",
-                "attempt": attempt,
-                "compatibility_mode": False,
-                "fallback_from_previous_response_id": fallback_from_previous,
-                "method": "POST",
-                "url": url,
-                "request": {"headers": {"Content-Type": "application/json"}, "json": self.payload_for_log(payload)},
-                "response": {
-                    "status_code": getattr(response, "status_code", None),
-                    "headers": dict(getattr(response, "headers", {}) or {}) if response is not None else {},
-                    "text": response_text,
-                    "json": response_json,
-                    "json_error": response_json_error,
-                },
-                "error": {"type": type(exc).__name__, "message": str(exc)},
-                "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
-            })
-            raise
-
-    def response_to_chat_completion(
-        self,
-        response_json: dict[str, Any],
-        request_payload: dict[str, Any],
-        fallback_from_previous: bool,
-    ) -> dict[str, Any]:
-        content_parts: list[str] = []
-        thinking_parts: list[str] = []
-        tool_calls: list[dict[str, Any]] = []
-        for item in response_json.get("output") or []:
-            item_type = item.get("type")
-            if item_type == "reasoning":
-                for part in item.get("content") or []:
-                    text = part.get("text") if isinstance(part, dict) else ""
-                    if text:
-                        thinking_parts.append(str(text))
-                continue
-            if item_type == "message":
-                for part in item.get("content") or []:
-                    if not isinstance(part, dict):
-                        continue
-                    if part.get("type") in {"output_text", "text"} and part.get("text") is not None:
-                        content_parts.append(str(part.get("text") or ""))
-                continue
-            if item_type == "function_call":
-                call_id = str(item.get("call_id") or item.get("id") or f"call_{uuid.uuid4().hex[:10]}")
-                tool_calls.append({
-                    "id": call_id,
-                    "type": "function",
-                    "function": {
-                        "name": str(item.get("name") or ""),
-                        "arguments": self.message_content_to_text(item.get("arguments") or "{}"),
+                self._write_raw_log({
+                    "timestamp": timestamp,
+                    "request_id": request_id,
+                    "kind": "lmstudio.openai.responses",
+                    "attempt": attempt,
+                    "transport_attempt": transport_attempt,
+                    "compatibility_mode": False,
+                    "fallback_from_previous_response_id": fallback_from_previous,
+                    "method": "POST",
+                    "url": url,
+                    "request": {"headers": {"Content-Type": "application/json"}, "json": payload_for_log(payload)},
+                    "response": {
+                        "status_code": response.status_code,
+                        "headers": dict(response.headers),
+                        "text": json.dumps(response_json, ensure_ascii=False),
+                        "json": response_json,
+                        "json_error": "",
                     },
+                    "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
                 })
+                return response_to_chat_completion(response_json, payload, fallback_from_previous)
+            except Exception as exc:
+                response = getattr(exc, "response", None)
+                response_text = getattr(response, "text", "") if response is not None else ""
+                response_json: Any = None
+                response_json_error = ""
+                if response is not None:
+                    try:
+                        response_json = response.json()
+                    except Exception as json_exc:
+                        response_json_error = str(json_exc)
+                transient = self._is_transient_lmstudio_error(exc, response_text, response_json)
+                self._write_raw_log({
+                    "timestamp": timestamp,
+                    "request_id": request_id,
+                    "kind": "lmstudio.openai.responses",
+                    "attempt": attempt,
+                    "transport_attempt": transport_attempt,
+                    "transient_retry": transient and transport_attempt < max_transport_attempts,
+                    "compatibility_mode": False,
+                    "fallback_from_previous_response_id": fallback_from_previous,
+                    "method": "POST",
+                    "url": url,
+                    "request": {"headers": {"Content-Type": "application/json"}, "json": payload_for_log(payload)},
+                    "response": {
+                        "status_code": getattr(response, "status_code", None),
+                        "headers": dict(getattr(response, "headers", {}) or {}) if response is not None else {},
+                        "text": response_text,
+                        "json": response_json,
+                        "json_error": response_json_error,
+                    },
+                    "error": {"type": type(exc).__name__, "message": str(exc)},
+                    "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
+                })
+                if transient and transport_attempt < max_transport_attempts:
+                    time.sleep(min(5, transport_attempt * 2))
+                    continue
+                raise
 
-        finish_reason = "tool_calls" if tool_calls else self.responses_finish_reason(response_json)
-        message: dict[str, Any] = {
-            "role": "assistant",
-            "content": "".join(content_parts),
-        }
-        if thinking_parts:
-            message["thinking"] = "\n".join(thinking_parts)
-        if tool_calls:
-            message["tool_calls"] = tool_calls
+        raise RuntimeError("LM Studio response request failed after retries.")
 
-        response_id = str(response_json.get("id") or "")
-        return {
-            "id": response_id,
-            "object": "chat.completion",
-            "created": response_json.get("created_at"),
-            "model": response_json.get("model"),
-            "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
-            "usage": response_json.get("usage") or {},
-            "_thursday": {
-                "api": "responses",
-                "response_id": response_id,
-                "previous_response_id": request_payload.get("previous_response_id") or "",
-                "used_previous_response_id": bool(request_payload.get("previous_response_id")),
-                "fallback_from_previous_response_id": fallback_from_previous,
-                "cached_tokens": ((response_json.get("usage") or {}).get("input_tokens_details") or {}).get("cached_tokens", 0),
-            },
-        }
 
-    def responses_finish_reason(self, response_json: dict[str, Any]) -> str:
-        if response_json.get("status") == "incomplete":
-            reason = (response_json.get("incomplete_details") or {}).get("reason")
-            if reason == "max_output_tokens":
-                return "length"
-            return str(reason or "incomplete")
-        if response_json.get("error"):
-            return "error"
-        return "stop"
 
     def max_tokens_for_context(self, settings: AgentSettings, prompt_estimate: int) -> int:
         context_window = max(1024, int(settings.context_window or self.config.default_context_window))
@@ -449,35 +360,26 @@ class LMStudioChatClient:
         except (TypeError, ValueError):
             return None
 
-    def _sanitize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        sanitized: list[dict[str, Any]] = []
-        for message in messages:
-            role = message.get("role")
-            content = message.get("content")
-            tool_calls = message.get("tool_calls")
-            images = message.get("images")
+    def _is_model_unavailable_exception(self, exc: Exception) -> bool:
+        response = getattr(exc, "response", None)
+        response_text = getattr(response, "text", "") if response is not None else ""
+        return "No models loaded" in response_text or "No models loaded" in str(exc)
 
-            if role == "assistant" and not content and not tool_calls:
-                continue
+    def _is_transient_lmstudio_error(self, exc: Exception, response_text: str, response_json: Any) -> bool:
+        response = getattr(exc, "response", None)
+        status_code = int(getattr(response, "status_code", 0) or 0)
+        combined = f"{response_text}\n{json.dumps(response_json, ensure_ascii=False, default=str) if response_json is not None else ''}\n{exc}"
+        if status_code >= 500:
+            return True
+        transient_markers = (
+            "LM Link connection closed",
+            "No models loaded",
+            "model is loading",
+            "model not loaded",
+            "server disconnected",
+        )
+        return any(marker.lower() in combined.lower() for marker in transient_markers)
 
-            clean: dict[str, Any] = {"role": role}
-            if content is not None:
-                clean["content"] = content
-            if isinstance(images, list) and images:
-                clean["images"] = self._sanitize_images(images)
-
-            if role == "assistant" and tool_calls:
-                clean["tool_calls"] = tool_calls
-            if role == "tool":
-                if message.get("tool_call_id"):
-                    clean["tool_call_id"] = message["tool_call_id"]
-                if message.get("name"):
-                    clean["name"] = message["name"]
-
-            if role in {"system", "user", "assistant", "tool"}:
-                sanitized.append(clean)
-
-        return sanitized
 
     def _create_chat_completion(
         self,
@@ -500,7 +402,7 @@ class LMStudioChatClient:
         try:
             raw_response = client.chat.completions.with_raw_response.create(**request_kwargs)
             parsed_response = raw_response.parse()
-            response_json = self.model_to_json(parsed_response)
+            response_json = model_to_json(parsed_response)
             self._write_raw_log({
                 "timestamp": timestamp,
                 "request_id": request_id,
@@ -509,10 +411,10 @@ class LMStudioChatClient:
                 "compatibility_mode": compatibility_mode,
                 "method": "POST",
                 "url": url,
-                "request": {"headers": {"Content-Type": "application/json"}, "json": self.payload_for_log(payload)},
+                "request": {"headers": {"Content-Type": "application/json"}, "json": payload_for_log(payload)},
                 "response": {
-                    "status_code": self.raw_response_status(raw_response),
-                    "headers": self.raw_response_headers(raw_response),
+                    "status_code": raw_response_status(raw_response),
+                    "headers": raw_response_headers(raw_response),
                     "text": json.dumps(response_json, ensure_ascii=False),
                     "json": response_json,
                     "json_error": "",
@@ -539,7 +441,7 @@ class LMStudioChatClient:
                 "compatibility_mode": compatibility_mode,
                 "method": "POST",
                 "url": url,
-                "request": {"headers": {"Content-Type": "application/json"}, "json": self.payload_for_log(payload)},
+                "request": {"headers": {"Content-Type": "application/json"}, "json": payload_for_log(payload)},
                 "response": {
                     "status_code": getattr(exc, "status_code", None),
                     "headers": dict(getattr(response, "headers", {}) or {}) if response is not None else {},
@@ -563,7 +465,7 @@ class LMStudioChatClient:
                 "compatibility_mode": compatibility_mode,
                 "method": "POST",
                 "url": url,
-                "request": {"headers": {"Content-Type": "application/json"}, "json": self.payload_for_log(payload)},
+                "request": {"headers": {"Content-Type": "application/json"}, "json": payload_for_log(payload)},
                 "error": {
                     "type": type(exc).__name__,
                     "message": str(exc),
@@ -590,141 +492,22 @@ class LMStudioChatClient:
             request_kwargs["extra_body"] = extra_body
         return request_kwargs
 
-    def _messages_for_transport(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        prepared: list[dict[str, Any]] = []
-        pending_tool_image_messages: list[dict[str, Any]] = []
-        fresh_tool_image_indexes = self._fresh_tool_image_indexes(messages)
-        for index, message in enumerate(messages):
-            clean = dict(message)
-            images = clean.pop("images", []) if index in fresh_tool_image_indexes else []
-            clean.pop("llm_images_consumed", None)
-            if clean.get("role") == "tool":
-                clean["content"] = self.message_content_to_text(message.get("content"))
-                prepared.append(clean)
-                if images:
-                    pending_tool_image_messages.append(self._tool_images_as_user_message(clean, images))
-                continue
-            if pending_tool_image_messages:
-                prepared.extend(pending_tool_image_messages)
-                pending_tool_image_messages.clear()
-            clean["content"] = self._content_for_transport(message.get("content"), images)
-            prepared.append(clean)
-        if pending_tool_image_messages:
-            prepared.extend(pending_tool_image_messages)
-        return prepared
 
-    def _fresh_tool_image_indexes(self, messages: list[dict[str, Any]]) -> set[int]:
-        fresh: set[int] = set()
-        assistant_seen_after = False
-        for index in range(len(messages) - 1, -1, -1):
-            message = messages[index]
-            role = message.get("role")
-            if role == "assistant":
-                assistant_seen_after = True
-            if (
-                role == "tool"
-                and message.get("images")
-                and not message.get("llm_images_consumed")
-                and not assistant_seen_after
-            ):
-                fresh.add(index)
-        return fresh
 
-    def _tool_images_as_user_message(self, tool_message: dict[str, Any], images: list[dict[str, Any]]) -> dict[str, Any]:
-        tool_name = str(tool_message.get("name") or "tool")
-        return {
-            "role": "user",
-            "content": self._content_for_transport(
-                f"Visual output from `{tool_name}`. Inspect the attached image(s) together with the preceding tool result.",
-                images,
-            ),
-        }
 
-    def _sanitize_images(self, images: list[Any]) -> list[dict[str, str]]:
-        sanitized: list[dict[str, str]] = []
-        for image in images:
-            if not isinstance(image, dict):
-                continue
-            path = str(image.get("path") or "")
-            if not path:
-                continue
-            sanitized.append(
-                {
-                    "path": path,
-                    "mime_type": str(image.get("mime_type") or "image/png"),
-                    "name": str(image.get("name") or image.get("source") or Path(path).name or "image"),
-                }
-            )
-        return sanitized
 
-    def _content_for_transport(self, content: Any, images: list[dict[str, Any]]) -> Any:
-        if not images:
-            return content
 
-        text = self.message_content_to_text(content)
-        prepared: list[Any] = [{"type": "text", "text": text or "Please analyze the attached image(s)."}]
-        for image in images:
-            path = Path(str(image.get("path") or ""))
-            mime_type = str(image.get("mime_type") or "image/png")
-            prepared.append({"type": "image_url", "image_url": {"url": self.image_data_url(path, mime_type)}})
-        return prepared
 
-    def message_content_to_text(self, content: Any) -> str:
-        if content is None:
-            return ""
-        if isinstance(content, str):
-            return content
-        return json.dumps(content, ensure_ascii=False)
 
-    def image_data_url(self, path: Path, mime_type: str) -> str:
-        resolved = path.resolve()
-        allowed_roots = [self.config.image_upload_dir.resolve(), self.config.visual_check_dir.resolve()]
-        if not any(root == resolved or root in resolved.parents for root in allowed_roots):
-            raise ValueError(f"Image path is outside allowed image directories: {resolved}")
-        data = base64.b64encode(resolved.read_bytes()).decode("ascii")
-        return f"data:{mime_type};base64,{data}"
 
-    def payload_for_log(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._redact_image_data(payload)
 
-    def _redact_image_data(self, value: Any) -> Any:
-        if isinstance(value, list):
-            return [self._redact_image_data(item) for item in value]
-        if isinstance(value, dict):
-            redacted: dict[str, Any] = {}
-            for key, item in value.items():
-                if key == "url" and isinstance(item, str) and item.startswith("data:image/"):
-                    redacted[key] = f"[image data URL redacted, chars={len(item)}]"
-                else:
-                    redacted[key] = self._redact_image_data(item)
-            return redacted
-        return value
 
-    def model_to_json(self, value: Any) -> dict[str, Any]:
-        if hasattr(value, "model_dump"):
-            dumped = value.model_dump(mode="json")
-            return dumped if isinstance(dumped, dict) else {"value": dumped}
-        if isinstance(value, dict):
-            return value
-        return json.loads(json.dumps(value, default=str))
 
-    def raw_response_status(self, raw_response: Any) -> int | None:
-        status = getattr(raw_response, "status_code", None)
-        if status is not None:
-            return int(status)
-        http_response = getattr(raw_response, "http_response", None)
-        status = getattr(http_response, "status_code", None)
-        return int(status) if status is not None else None
-
-    def raw_response_headers(self, raw_response: Any) -> dict[str, str]:
-        headers = getattr(raw_response, "headers", None)
-        if headers is None:
-            http_response = getattr(raw_response, "http_response", None)
-            headers = getattr(http_response, "headers", None)
-        return {str(key): str(value) for key, value in dict(headers or {}).items()}
 
     def _write_raw_log(self, record: dict[str, Any]) -> None:
         if not self.config.lmstudio_raw_log_enabled:
             return
         with self._raw_log_lock:
             insert_raw_lmstudio_log(self.config.log_db_file, record)
+
+

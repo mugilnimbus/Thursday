@@ -17,7 +17,7 @@ TOOL_DEFINITION = {
             "List available Thursday skill package metadata from SKILL.md frontmatter. "
             "Use when deciding which skill to load or when the always-visible skill catalog may be stale. "
             "This returns names, what each skill does, when to use it, validated descriptions, "
-            "always-active status, and bundled resource paths, but not full skill bodies."
+            "and bundled resource paths, but not full skill bodies."
         ),
         "parameters": {
             "type": "object",
@@ -28,9 +28,9 @@ TOOL_DEFINITION = {
 
 
 def run(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    catalog = SkillCatalog(context.config.prompt_dir / "skills")
+    catalog = SkillCatalog(context.config.skill_dir)
     return {
         "ok": True,
         "skills": catalog.catalog(),
-        "message": "Skill metadata listed. Use load_skill for a specific non-always-active skill body.",
+        "message": "Skill metadata listed. Use load_skill for a specific skill body.",
     }

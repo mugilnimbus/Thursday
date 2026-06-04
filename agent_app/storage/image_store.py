@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from ..config import AppConfig
+from ..runtime.config import AppConfig
 
 
 ALLOWED_IMAGE_TYPES = {
@@ -129,3 +129,4 @@ def resolve_served_image(config: AppConfig, path_value: str) -> tuple[Path, str]
         raise FileNotFoundError("Image not found.")
     mime_type = normalize_mime_type("", path.name)
     return path, mime_type
+

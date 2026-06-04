@@ -37,7 +37,7 @@ TOOL_DEFINITION = {
 
 
 def run(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    catalog = SkillCatalog(context.config.prompt_dir / "skills")
+    catalog = SkillCatalog(context.config.skill_dir)
     skill_name = str(args.get("skill_name") or "").strip()
     resource_path = str(args.get("resource_path") or "").strip()
     try:

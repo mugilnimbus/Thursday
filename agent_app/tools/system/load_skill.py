@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...config import CONFIG
 from ...skills import SkillCatalog
 from ..context import ToolContext
 
@@ -10,7 +9,6 @@ from ..context import ToolContext
 TOOL_NAME = "load_skill"
 TOOL_ORDER = 50
 REQUIRES_CONTAINER = False
-_CATALOG = SkillCatalog(CONFIG.prompt_dir / "skills")
 
 TOOL_DEFINITION = {
     "type": "function",
@@ -29,7 +27,6 @@ TOOL_DEFINITION = {
                 "skill_name": {
                     "type": "string",
                     "description": "Skill package name to load. Use a name from the skill catalog.",
-                    "enum": _CATALOG.names(),
                 },
             },
             "required": ["skill_name"],
@@ -39,19 +36,13 @@ TOOL_DEFINITION = {
 
 
 def run(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
-    catalog = SkillCatalog(context.config.prompt_dir / "skills")
+    catalog = SkillCatalog(context.config.skill_dir)
     requested_name = str(args.get("skill_name") or "").strip()
     spec = catalog.get(requested_name)
     if not spec:
         return {
             "ok": False,
             "error": f"Unknown skill: {requested_name}",
-            "available_skills": catalog.catalog(),
-        }
-    if spec.always_active:
-        return {
-            "ok": False,
-            "error": f"Skill is always active and does not need loading: {spec.name}",
             "available_skills": catalog.catalog(),
         }
     instruction_message = (
@@ -70,3 +61,4 @@ def run(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         "loaded_as": "user_message",
         "message": f"Skill loaded: {spec.name}",
     }
+

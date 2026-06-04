@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1320" viewBox="0 0 1800 1320" role="img" aria-labelledby="title desc">
   <title id="title">Thursday Agent Control Flow Diagram</title>
-  <desc id="desc">Control flow for one Thursday agent turn from user message through frontend, backend, orchestrator, LLM, skill loading, tool dispatch, observations, retry handling, persistence, and final answer.</desc>
+  <desc id="desc">Control flow for one Thursday agent turn from user message through frontend, server, orchestrator, LLM, skill loading, tool dispatch, observations, retry handling, persistence, and final answer.</desc>
   <defs>
     <style>
       .bg { fill: #f7f9fc; }
@@ -52,7 +52,7 @@
   <text x="105" y="1115" class="small">Messages, events, files</text>
 
   <rect x="335" y="145" width="285" height="1060" class="lane"/>
-  <text x="365" y="185" class="lane-title">Backend Runtime</text>
+  <text x="365" y="185" class="lane-title">Server Runtime</text>
   <rect x="365" y="235" width="225" height="92" class="step"/>
   <text x="390" y="268" class="label">HTTP route</text>
   <text x="390" y="294" class="text">POST chat turn</text>
@@ -158,3 +158,5 @@
   <text x="95" y="1274" class="label">Loop invariant:</text>
   <text x="225" y="1274" class="text">The model chooses tool calls, the dispatcher parses and routes them, the registry invokes tools, and the orchestrator only controls the loop and records observations.</text>
 </svg>
+
+

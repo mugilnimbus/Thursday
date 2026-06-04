@@ -2,7 +2,7 @@
 
 Thursday is a local software-building agent with a web dashboard for chat, tool control, monitoring, timelines, settings, and raw LM Studio logs.
 
-The agent uses a local LM Studio server through the OpenAI-compatible chat-completions API and executes project tools only inside an Ubuntu Docker workspace.
+The agent uses a local LM Studio server through OpenAI-compatible APIs, preferring `/v1/responses` with `previous_response_id` and falling back to chat completions when needed. Project tools execute only when the model calls the unified tool layer.
 
 ## What It Does
 
@@ -162,7 +162,7 @@ DEFAULT_CONTEXT_WINDOW=100000
 DEFAULT_MAX_TOKENS=32000
 WRITE_FILE_SUMMARY_MIN_CHARS=500
 WRITE_FILE_SUMMARY_MAX_TOKENS=300
-REMINDER_TIMEZONE=Europe/Dublin
+REMINDER_TIMEZONE=UTC
 REMINDER_POLL_SECONDS=60
 ```
 
@@ -223,7 +223,7 @@ There are no notification-only reminders. Every due reminder runs an LLM turn.
 Example requests:
 
 ```text
-Tell me the weather outside daily around 10 o'clock before work.
+Tell me the weather for my configured location daily around 10 o'clock before work.
 Tell me the EUR to INR conversion daily around 11 o'clock.
 Remind me every Friday at 6pm to review my weekly notes.
 Run my standup preparation every 30 minutes.
@@ -249,7 +249,7 @@ The tool uses the configured system timezone automatically. The model should not
 Reminder settings:
 
 ```text
-REMINDER_TIMEZONE=Europe/Dublin
+REMINDER_TIMEZONE=UTC
 REMINDER_POLL_SECONDS=60
 ```
 
@@ -307,20 +307,24 @@ Key component files:
 scripts/server.py                         Starts the dashboard HTTP server
 scripts/thursday.ps1                      Start/stop/restart/status/logs/workspace control
 agent_app/ARCHITECTURE.md                 Component boundaries and wiring rules
-agent_app/config.py                       Loads .env config
-agent_app/backend/http_server.py          Serves API and dashboard files
+agent_app/runtime/config.py               Loads .env config
+agent_app/server/http_server.py           Constructs the HTTP server
+agent_app/server/handler.py               Serves API routes and delegates to runtime state
 agent_app/runtime/app_state.py            Wires sessions, reminders, preferences, and orchestration
 agent_app/orchestration/orchestrator.py   Runs agent turn control flow
 agent_app/orchestration/messages.py       Normalizes user/model/image messages
 agent_app/orchestration/context_manager.py Manages context pruning and summaries
-agent_app/skills/                         Discovers skill packages and frontmatter metadata
+agent_app/skills/catalog.py               Discovers skill packages and frontmatter metadata
+agent_app/skills/packages/                Skill packages with SKILL.md, references, scripts, and assets
 agent_app/tools/dispatcher.py             Parses model tool calls and invokes registered tools
 agent_app/tools/results.py                Shapes tool results and fallback summaries
 agent_app/tools/registry.py               Discovers and executes tool modules
 agent_app/llm/lmstudio_client.py          Calls LM Studio
 agent_app/storage/session_store.py        Persists sessions in SQLite
-agent_app/logging_store/sqlite_logs.py    Stores app, HTTP, server, and raw LLM logs
-prompts/skills/                           Skill packages with SKILL.md, references, scripts, and assets
+agent_app/logging/                        Stores app, HTTP, server, and raw LLM logs
+agent_app/utils/                          Small generic helpers split by concern
+prompts/operating_instructions.md         Permanent operating instruction message
+prompts/tool_operations.md                Always-active tool and skill operating manual
 ```
 
 ## Development

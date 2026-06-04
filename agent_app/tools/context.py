@@ -7,8 +7,8 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 import re
 
-from ..config import AppConfig
-from ..reminders import ReminderStore
+from ..runtime.config import AppConfig
+from ..storage.reminder_store import ReminderStore
 
 
 @dataclass
@@ -177,3 +177,4 @@ def browser_diagnostics(stderr: str) -> list[str]:
         if any(token in lowered for token in ("error", "failed", "not found", "exception", "refused")):
             diagnostics.append(line.strip())
     return diagnostics
+

@@ -9,10 +9,10 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from agent_app.config import CONFIG
-from agent_app.http_app import create_server
-from agent_app.sqlite_logging import SQLiteLogHandler, import_raw_lmstudio_jsonl
-from agent_app.state import AppState
+from agent_app.runtime.config import CONFIG
+from agent_app.server import create_server
+from agent_app.logging import SQLiteLogHandler, import_raw_lmstudio_jsonl
+from agent_app.runtime import AppState
 
 
 def configure_logging() -> None:
@@ -73,3 +73,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

@@ -1,21 +1,26 @@
 from __future__ import annotations
 
 import logging
-import shutil
 import threading
 import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
 
-from ..config import AppConfig
-from ..models import AgentSettings, Session
-from ..logging_store import clear_log_tables
+from .config import AppConfig
+from .models import AgentSettings, Session
 from ..orchestration import AgentOrchestrator
-from ..preferences import DashboardPreferences, PreferenceStore
-from ..preferences import REQUIRED_TOOLS
-from ..reminders import Reminder, ReminderStore
+from .preferences import DashboardPreferences, PreferenceStore
+from .preferences import REQUIRED_TOOLS
+from .reminder_models import Reminder
 from ..storage import ImageStore, SessionStore
-from ..workspace import docker_workspace_status, reset_docker_workspace
+from ..storage.reminder_store import ReminderStore
+from .workspace import docker_workspace_status, reset_docker_workspace
+from .maintenance import clear_runtime_logs
+from .model_context import (
+    apply_model_context_to_agent_settings,
+    safe_int,
+    with_model_context_settings,
+)
 
 
 REMINDER_SESSION_TITLE = "Scheduled reminders"
@@ -74,6 +79,36 @@ class AppState:
                 "result": {"ok": "boolean", "tool": "tool name", "output": "successful data", "error": "failure object or null", "meta": "execution metadata"},
             },
         }
+
+    def gui_for_llm_public(self) -> dict[str, object]:
+        result = self.orchestrator.tools.invoke("gui_for_llm", {"input": {"action": "list_displays"}})
+        if not result.get("ok"):
+            return result
+        output = result.get("output") if isinstance(result.get("output"), dict) else {}
+        return {
+            "ok": True,
+            "displays": output.get("displays", []),
+            "active_region": output.get("active_region"),
+            "coordinate_spaces": output.get("coordinate_spaces", {}),
+        }
+
+    def update_gui_for_llm_region(self, payload: dict[str, object]) -> dict[str, object]:
+        target = {
+            "display": self.safe_int(payload.get("display"), 0),
+            "region": {
+                "x": self.safe_int(payload.get("x"), 0),
+                "y": self.safe_int(payload.get("y"), 0),
+                "width": self.safe_int(payload.get("width"), 800),
+                "height": self.safe_int(payload.get("height"), 600),
+            },
+        }
+        return self.orchestrator.tools.invoke(
+            "gui_for_llm",
+            {"input": {"action": "set_active_region", "target": target}},
+        )
+
+    def capture_gui_for_llm_region(self) -> dict[str, object]:
+        return self.orchestrator.tools.invoke("gui_for_llm", {"input": {"action": "screenshot"}})
 
     def run_chat_turn(
         self,
@@ -155,14 +190,7 @@ class AppState:
             return {"ok": True, "cleared": max(count, stored)}
 
     def clear_logs(self) -> dict[str, object]:
-        result = clear_log_tables(self.config.log_db_file)
-        artifacts = {
-            "visual_checks": self.clear_directory_contents(self.config.visual_check_dir),
-            "server_log": self.truncate_file(self.config.log_dir / "server.log"),
-            "server_error_log": self.truncate_file(self.config.log_dir / "server.err.log"),
-            "legacy_raw_log": self.truncate_file(self.config.lmstudio_raw_log_file),
-        }
-        return {**result, "artifacts": artifacts}
+        return clear_runtime_logs(self.config)
 
     def reminders_public(self, include_disabled: bool = True) -> dict[str, object]:
         reminders = [reminder.public() for reminder in self.reminder_store.list_reminders(include_disabled=include_disabled)]
@@ -194,29 +222,6 @@ class AppState:
             for session in self.sessions.values()
             if session.status == "running"
         ]
-
-    def clear_directory_contents(self, path) -> dict[str, object]:
-        path.mkdir(parents=True, exist_ok=True)
-        removed = 0
-        errors: list[str] = []
-        for child in path.iterdir():
-            try:
-                if child.is_dir():
-                    shutil.rmtree(child)
-                else:
-                    child.unlink()
-                removed += 1
-            except Exception as exc:
-                errors.append(f"{child}: {exc}")
-        return {"path": str(path), "removed": removed, "errors": errors}
-
-    def truncate_file(self, path) -> dict[str, object]:
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("", encoding="utf-8")
-            return {"path": str(path), "ok": True}
-        except Exception as exc:
-            return {"path": str(path), "ok": False, "error": str(exc)}
 
     def shutdown(self) -> None:
         self.stop_event.set()
@@ -300,28 +305,13 @@ class AppState:
         return settings
 
     def with_model_context_settings(self, settings: dict[str, object]) -> dict[str, object]:
-        patched = dict(settings or {})
-        endpoint = str(patched.get("endpoint") or self.config.lmstudio_endpoint)
-        model = str(patched.get("model") or self.config.lmstudio_model)
-        fallback = self.safe_int(patched.get("context_window"), self.config.default_context_window)
-        context = self.orchestrator.llm.model_context_window(endpoint, model, fallback)
-        patched["context_window"] = int(context["context_window"])
-        patched["max_tokens"] = min(
-            self.safe_int(patched.get("max_tokens"), self.config.default_max_tokens),
-            int(context["context_window"]),
-        )
-        return patched
+        return with_model_context_settings(self.config, self.orchestrator.llm, settings)
 
     def apply_model_context_to_agent_settings(self, settings: AgentSettings) -> None:
-        context_settings = self.with_model_context_settings(asdict(settings))
-        settings.context_window = int(context_settings["context_window"])
-        settings.max_tokens = int(context_settings["max_tokens"])
+        apply_model_context_to_agent_settings(self.config, self.orchestrator.llm, settings)
 
     def safe_int(self, value: object, fallback: int) -> int:
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return int(fallback)
+        return safe_int(value, fallback)
 
     def reminder_prompt(self, reminder: Reminder) -> str:
         return (
@@ -336,3 +326,4 @@ class AppState:
             "Run this as a normal Thursday agent turn. Use tools when the task needs live or verified information. "
             "Do not merely acknowledge the reminder. Complete the reminder task and give the user the useful result."
         )
+

@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from ..config import AppConfig
-from ..reminders import ReminderStore
+from ..runtime.config import AppConfig
+from ..storage.reminder_store import ReminderStore
 from .api import (
     elapsed_ms,
     error_response,
@@ -184,3 +184,4 @@ class ToolRegistry:
             stat = path.stat()
             snapshot.append((path.name, stat.st_mtime_ns, stat.st_size))
         return tuple(sorted(snapshot))
+

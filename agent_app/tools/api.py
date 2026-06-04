@@ -24,6 +24,17 @@ def input_envelope_schema(input_schema: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def compact_input_envelope_schema(input_schema: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "input": compact_schema(input_schema or {"type": "object", "properties": {}}),
+        },
+        "required": ["input"],
+        "additionalProperties": False,
+    }
+
+
 def output_envelope_schema() -> dict[str, Any]:
     return {
         "type": "object",
@@ -55,19 +66,54 @@ def tool_definition_envelope(definition: dict[str, Any]) -> dict[str, Any]:
     function = definition.get("function", {}) if isinstance(definition.get("function"), dict) else {}
     input_schema = function.get("parameters") if isinstance(function.get("parameters"), dict) else {"type": "object", "properties": {}}
     description = str(function.get("description") or "").strip()
-    output_schema_text = (
-        "Tool call format: pass arguments as {\"input\": {...}}. "
-        "Tool result format is always {ok, tool, output, error, meta}. "
-        "Read output for successful data and error.message for failures."
-    )
     return {
         "type": "function",
         "function": {
             "name": function.get("name"),
-            "description": f"{description}\n\n{output_schema_text}".strip(),
-            "parameters": input_envelope_schema(input_schema),
+            "description": compact_description(description),
+            "parameters": compact_input_envelope_schema(input_schema),
         },
     }
+
+
+def compact_description(description: str) -> str:
+    first_sentence = description.replace("\n", " ").split(". ", 1)[0].strip()
+    if len(first_sentence) > 280:
+        first_sentence = first_sentence[:277].rstrip() + "..."
+    return f"{first_sentence}. Args must be inside input."
+
+
+def compact_schema(schema: Any) -> Any:
+    if isinstance(schema, list):
+        return [compact_schema(item) for item in schema]
+    if not isinstance(schema, dict):
+        return schema
+    compact: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key == "description":
+            text = str(value)
+            if text:
+                compact[key] = text[:96].rstrip()
+            continue
+        if key == "properties" and isinstance(value, dict):
+            compact[key] = {str(name): compact_schema(child) for name, child in value.items()}
+            continue
+        if key == "items":
+            compact[key] = compact_schema(value)
+            continue
+        if key in {
+            "type",
+            "required",
+            "enum",
+            "default",
+            "additionalProperties",
+            "minimum",
+            "maximum",
+            "minItems",
+            "maxItems",
+        }:
+            compact[key] = compact_schema(value)
+    return compact
 
 
 def started_timer() -> float:

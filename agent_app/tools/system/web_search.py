@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -25,6 +26,11 @@ TOOL_DEFINITION = {
     },
 }
 
+BLOCKED_HOSTS = {
+    "lmstudio.co.com",
+    "www.lmstudio.co.com",
+}
+
 
 def run(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     query = str(args["query"]).strip()
@@ -36,10 +42,16 @@ def run(context: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
 
     parser = SearchResultParser()
     parser.feed(response.text)
+    results = [result for result in parser.results if not blocked_result(result)]
     return {
         "ok": True,
         "query": query,
-        "results": parser.results,
-        "count": len(parser.results),
+        "results": results,
+        "count": len(results),
         "source": "DuckDuckGo Lite",
     }
+
+
+def blocked_result(result: dict[str, str]) -> bool:
+    host = urlparse(str(result.get("url") or "")).netloc.lower()
+    return host in BLOCKED_HOSTS

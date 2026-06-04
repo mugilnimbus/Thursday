@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1180" viewBox="0 0 1800 1180" role="img" aria-labelledby="title desc">
   <title id="title">Thursday Agent Components Diagram</title>
-  <desc id="desc">Component architecture for the Thursday agent, showing frontend, backend runtime, orchestration, LLM, skills, tools, storage, logs, Docker workspace, and host integrations.</desc>
+  <desc id="desc">Component architecture for the Thursday agent, showing frontend, server/runtime, orchestration, LLM, skills, tools, storage, logs, Docker workspace, and host integrations.</desc>
   <defs>
     <style>
       .bg { fill: #f7f9fc; }
@@ -37,7 +37,7 @@
 
   <rect class="bg" width="1800" height="1180"/>
   <text x="70" y="70" class="zone-title" style="font-size:34px;">Thursday Agent Architecture</text>
-  <text x="70" y="100" class="zone-subtitle">Clean component boundaries: frontend, backend runtime, orchestration, LLM adapter, skill catalog, unified tool API, concrete tools, storage, logs, and external execution targets.</text>
+  <text x="70" y="100" class="zone-subtitle">Clean component boundaries: frontend, server/runtime, orchestration, LLM adapter, skill catalog, unified tool API, concrete tools, storage, logs, and external execution targets.</text>
 
   <rect x="60" y="145" width="280" height="855" class="zone"/>
   <text x="85" y="190" class="zone-title">Frontend</text>
@@ -62,11 +62,11 @@
   <text x="112" y="808" class="text">directly.</text>
 
   <rect x="390" y="145" width="350" height="855" class="zone"/>
-  <text x="415" y="190" class="zone-title">Backend Runtime</text>
-  <text x="415" y="218" class="zone-subtitle">agent_app/backend + runtime</text>
+  <text x="415" y="190" class="zone-title">Server Runtime</text>
+  <text x="415" y="218" class="zone-subtitle">agent_app/server + runtime</text>
   <rect x="420" y="255" width="280" height="100" class="box-strong"/>
   <text x="445" y="292" class="label">HTTP Server</text>
-  <text x="445" y="320" class="text">backend/http_server.py</text>
+  <text x="445" y="320" class="text">server/http_server.py</text>
   <text x="445" y="343" class="small">REST endpoints and static UI</text>
   <rect x="420" y="385" width="280" height="125" class="box-strong"/>
   <text x="445" y="422" class="label">AppState</text>
@@ -79,7 +79,7 @@
   <text x="445" y="629" class="small">System prompt and env settings</text>
   <rect x="420" y="685" width="280" height="115" class="box-data"/>
   <text x="445" y="722" class="label">Stores</text>
-  <text x="445" y="750" class="text">storage/, logging_store/</text>
+  <text x="445" y="750" class="text">storage/, logging/</text>
   <text x="445" y="774" class="small">Sessions, images, sqlite logs</text>
 
   <rect x="790" y="145" width="350" height="855" class="zone"/>
@@ -105,7 +105,7 @@
 
   <rect x="1190" y="145" width="540" height="855" class="zone"/>
   <text x="1215" y="190" class="zone-title">Tool System + External Targets</text>
-  <text x="1215" y="218" class="zone-subtitle">agent_app/tools, prompts/skills, LM Studio, host, Docker</text>
+  <text x="1215" y="218" class="zone-subtitle">agent_app/tools, agent_app/skills, LM Studio, host, Docker</text>
   <rect x="1220" y="255" width="210" height="115" class="box-strong"/>
   <text x="1242" y="292" class="label">LM Adapter</text>
   <text x="1242" y="320" class="text">llm/lmstudio_client.py</text>
@@ -141,7 +141,7 @@
 
   <rect x="1220" y="785" width="210" height="130" class="box-data"/>
   <text x="1242" y="822" class="label">Skill Packages</text>
-  <text x="1242" y="850" class="text">prompts/skills/*</text>
+  <text x="1242" y="850" class="text">skills/packages/*</text>
   <text x="1242" y="874" class="small">SKILL.md metadata,</text>
   <text x="1242" y="897" class="small">references, scripts, assets</text>
   <rect x="1490" y="785" width="210" height="130" class="box-external"/>
@@ -168,3 +168,5 @@
   <text x="230" y="1073" class="text">The orchestrator owns turn sequencing only. Tool parsing and routing live in the dispatcher and registry. Concrete behavior lives in individual tool modules. Skill metadata lives in each SKILL.md package.</text>
   <text x="92" y="1102" class="small">This keeps control flow, tool API, skill knowledge, persistent state, and execution targets separated.</text>
 </svg>
+
+

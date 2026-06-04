@@ -36,7 +36,8 @@ TOOL_DEFINITION = {
             "and attaches the image for VLM inspection. Does not read DOM text, scrape "
             "visible text, or parse page content. Do not use this when the user asks to read file text/source "
             "directly, inspect file contents, or says not visually; use run_command with PowerShell Get-Content "
-            "for Windows host paths instead."
+            "for Windows host paths instead. Do not use this for weather, news, prices, current facts, "
+            "or search-result text extraction; use web_search plus run_command/HTTP fetching for those."
         ),
         "parameters": {
             "type": "object",
